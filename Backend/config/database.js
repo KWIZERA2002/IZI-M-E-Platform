@@ -286,21 +286,46 @@ function createPostgresPool(connectionString) {
 const pool = (() => {
   try {
     const isUsingSqlite = isSqliteUrl(DATABASE_URL);
-    console.log(`[DB] Using database: ${isUsingSqlite ? 'SQLite' : 'PostgreSQL'}`);
-    console.log(`[DB] URL: ${isUsingSqlite ? DEFAULT_SQLITE_PATH : (DATABASE_URL || 'NOT SET')}`);
+    console.log(`[DB] Initializing pool: ${isUsingSqlite ? 'SQLite' : 'PostgreSQL'}`);
     
-    const createdPool = isUsingSqlite
-      ? createSqliteClient(DATABASE_URL.replace('sqlite://', ''))
-      : createPostgresPool(DATABASE_URL);
-    
-    if (!createdPool.initializeSchema) {
-      createdPool.initializeSchema = async () => {};
+    let createdPool;
+    try {
+      createdPool = isUsingSqlite
+        ? createSqliteClient(DATABASE_URL.replace('sqlite://', ''))
+        : createPostgresPool(DATABASE_URL || '');
+    } catch (innerError) {
+      console.error('[DB] Pool creation failed:', innerError.message);
+      
+      // Fallback to SQLite if Postgres fails
+      if (!isUsingSqlite) {
+        console.log('[DB] Falling back to SQLite due to Postgres error');
+        createdPool = createSqliteClient(DEFAULT_SQLITE_PATH);
+      } else {
+        throw innerError;
+      }
     }
     
+    if (!createdPool) {
+      throw new Error('Failed to create database pool');
+    }
+    
+    if (!createdPool.initializeSchema) {
+      createdPool.initializeSchema = async () => {
+        console.log('[DB] initializeSchema not defined, skipping');
+      };
+    }
+    
+    console.log('[DB] Pool initialized successfully');
     return createdPool;
   } catch (error) {
-    console.error('[DB] Pool initialization error:', error.message);
-    throw error;
+    console.error('[DB] CRITICAL: Pool initialization error:', error.message);
+    console.error('[DB] Stack:', error.stack);
+    // Return a stub pool that will fail requests gracefully
+    return {
+      query: async () => { throw error; },
+      initializeSchema: async () => { throw error; },
+      close: () => {}
+    };
   }
 })();
 

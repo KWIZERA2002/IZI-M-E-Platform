@@ -11,6 +11,11 @@ const configuredOrigins = String(process.env.FRONTEND_URL || '')
   .map((origin) => origin.trim())
   .filter(Boolean);
 
+// Add Render's own URL if available (auto-set by Render)
+if (process.env.RENDER_EXTERNAL_URL) {
+  configuredOrigins.push(process.env.RENDER_EXTERNAL_URL.replace(/\/$/, ''));
+}
+
 const devOrigins = [
   'http://localhost:3000',
   'http://127.0.0.1:3000',
@@ -24,9 +29,15 @@ const allowedOrigins = new Set([...configuredOrigins, ...devOrigins]);
 
 app.use(cors({
   origin(origin, callback) {
+    // No origin = same-origin request or non-browser client, allow it
     if (!origin) return callback(null, true);
-    if (!allowedOrigins.size) return callback(null, true);
+    // If no production origins configured, allow all (single-service mode)
+    if (!configuredOrigins.length) return callback(null, true);
+    // Allow configured + dev origins
     if (allowedOrigins.has(origin)) return callback(null, true);
+    // Allow same-host requests
+    const host = process.env.RENDER_EXTERNAL_URL || process.env.APP_URL || '';
+    if (host && origin === host.replace(/\/$/, '')) return callback(null, true);
     return callback(new Error(`CORS blocked for origin ${origin}`));
   },
   optionsSuccessStatus: 200,

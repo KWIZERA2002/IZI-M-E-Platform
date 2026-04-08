@@ -1,6 +1,5 @@
 const fs = require('fs');
 const path = require('path');
-const sqlite3 = require('sqlite3').verbose();
 const { Pool } = require('pg');
 
 require('./loadEnv');
@@ -174,6 +173,13 @@ function convertPlaceholders(sql) {
 }
 
 function createSqliteClient(filePath) {
+  let sqlite3;
+  try {
+    sqlite3 = require('sqlite3').verbose();
+  } catch (error) {
+    throw new Error(`SQLite driver is unavailable: ${error.message}`);
+  }
+
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 

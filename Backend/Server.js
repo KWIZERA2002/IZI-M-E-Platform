@@ -322,16 +322,35 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(frontendPath, 'IZI-ME-Platform.html'));
 });
 
+// Global error handler - must be last
+app.use((err, req, res, next) => {
+  console.error('[ERROR]', err.message || err);
+  res.status(err.status || 500).json({
+    error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message
+  });
+});
+
 const PORT = process.env.PORT || 5000;
 
 async function startServer() {
   try {
+    console.log('[SERVER] Initializing database...');
     if (pool.initializeSchema) {
       await pool.initializeSchema();
     }
-    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+    
+    // Test database connection
+    console.log('[SERVER] Testing database connection...');
+    const testQuery = await pool.query('SELECT 1 as test');
+    console.log('[SERVER] Database connection verified ✓');
+    
+    app.listen(PORT, () => {
+      console.log(`[SERVER] Running on port ${PORT} 🚀`);
+      console.log(`[SERVER] API: http://localhost:${PORT}/api`);
+    });
   } catch (error) {
-    console.error('Server startup failed:', error.message);
+    console.error('[SERVER] Startup failed:', error.message);
+    console.error('[SERVER] Stack:', error.stack);
     process.exit(1);
   }
 }

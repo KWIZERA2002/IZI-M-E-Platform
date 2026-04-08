@@ -241,7 +241,10 @@ function createPostgresPool(connectionString) {
   });
 
   pool.initializeSchema = async () => {
-    if (pool._schemaInitialized) return;
+    if (pool._schemaInitialized) {
+      console.log('[DB] Schema already initialized, skipping');
+      return;
+    }
 
     const schemaPath = path.join(__dirname, '..', '..', 'Database', 'Schema.sql');
     if (!fs.existsSync(schemaPath)) {
@@ -249,20 +252,30 @@ function createPostgresPool(connectionString) {
     }
 
     try {
+      console.log('[DB] Starting schema initialization...');
       const schemaSql = fs.readFileSync(schemaPath, 'utf8');
       const statements = schemaSql
         .split(';')
         .map((stmt) => stmt.trim())
         .filter((stmt) => stmt.length > 0);
 
+      console.log(`[DB] Found ${statements.length} SQL statements to execute`);
+      let executed = 0;
       for (const statement of statements) {
-        await pool.query(statement);
+        try {
+          await pool.query(statement);
+          executed++;
+        } catch (stepError) {
+          console.error(`[DB] Error executing statement ${executed + 1}:`, stepError.message);
+          throw stepError;
+        }
       }
 
       pool._schemaInitialized = true;
-      console.log('[DB] Postgres schema initialized successfully');
+      console.log(`[DB] Postgres schema initialized successfully (${executed} statements)`);
     } catch (error) {
-      console.error('[DB] Schema initialization error:', error.message);
+      console.error('[DB] Schema initialization failed:', error.message);
+      console.error('[DB] Full error:', error);
       throw error;
     }
   };

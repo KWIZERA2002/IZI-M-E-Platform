@@ -5,6 +5,7 @@ const { Pool } = require('pg');
 require('./loadEnv');
 
 const DEFAULT_SQLITE_PATH = path.join(__dirname, '..', 'data', 'izi-me.db');
+const POSTGRES_SCHEMA_PATH = path.join(__dirname, '..', '..', 'Database', 'Schema.sql');
 const envUrl = process.env.DATABASE_URL || '';
 const DATABASE_URL = envUrl && !envUrl.includes('postgres://username:password@localhost:5432/izi_db')
   ? envUrl
@@ -235,14 +236,29 @@ function createPostgresPool(connectionString) {
   const useSsl = String(process.env.PGSSL || process.env.DATABASE_SSL || '').toLowerCase() === 'true'
     || String(process.env.NODE_ENV || '').toLowerCase() === 'production';
 
-  return new Pool({
+  const pool = new Pool({
     connectionString,
     ssl: useSsl ? { rejectUnauthorized: false } : false,
   });
+
+  pool.ready = (async () => {
+    if (!fs.existsSync(POSTGRES_SCHEMA_PATH)) {
+      throw new Error(`Postgres schema file not found at ${POSTGRES_SCHEMA_PATH}`);
+    }
+
+    const schemaSql = fs.readFileSync(POSTGRES_SCHEMA_PATH, 'utf8');
+    await pool.query(schemaSql);
+  })();
+
+  return pool;
 }
 
 const pool = isSqliteUrl(DATABASE_URL)
   ? createSqliteClient(DATABASE_URL.replace('sqlite://', ''))
   : createPostgresPool(DATABASE_URL);
+
+if (!pool.ready) {
+  pool.ready = Promise.resolve();
+}
 
 module.exports = pool;

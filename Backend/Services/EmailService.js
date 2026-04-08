@@ -12,6 +12,10 @@ const transporter = nodemailer.createTransport({
   }
 });
 
+if (!emailDisabled) {
+  console.log('[Mail] SMTP configured and ready');
+}
+
 const sendVerificationEmail = async (email, username, token) => {
   const verifyUrl = `${process.env.APP_URL}/verify?token=${token}`;
   if (emailDisabled) {

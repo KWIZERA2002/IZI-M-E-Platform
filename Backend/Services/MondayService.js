@@ -6,9 +6,10 @@ class MondayService {
     this.apiToken = process.env.MONDAY_API_TOKEN;
     this.boardId = process.env.MONDAY_BOARD_ID;
     this.apiUrl = 'https://api.monday.com/v2';
-    if (!this.apiToken || !this.boardId) {
-      console.warn('Monday.com API token or BOARD_ID is not configured');
-    }
+  }
+
+  isConfigured() {
+    return !!this.apiToken && !!this.boardId;
   }
 
   async request(query, variables = {}) {

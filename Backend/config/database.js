@@ -5,7 +5,6 @@ const { Pool } = require('pg');
 require('./loadEnv');
 
 const DEFAULT_SQLITE_PATH = path.join(__dirname, '..', 'data', 'izi-me.db');
-const POSTGRES_SCHEMA_PATH = path.join(__dirname, '..', '..', 'Database', 'Schema.sql');
 const envUrl = process.env.DATABASE_URL || '';
 const DATABASE_URL = envUrl && !envUrl.includes('postgres://username:password@localhost:5432/izi_db')
   ? envUrl

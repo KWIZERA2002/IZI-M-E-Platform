@@ -326,7 +326,9 @@ const PORT = process.env.PORT || 5000;
 
 async function startServer() {
   try {
-    await pool.ready;
+    if (pool.initializeSchema) {
+      await pool.initializeSchema();
+    }
     app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
   } catch (error) {
     console.error('Server startup failed:', error.message);

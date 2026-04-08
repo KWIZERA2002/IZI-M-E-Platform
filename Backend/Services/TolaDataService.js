@@ -5,9 +5,10 @@ class TolaDataService {
   constructor() {
     this.apiToken = process.env.TOLADATA_API_TOKEN;
     this.baseUrl = process.env.TOLADATA_BASE_URL || 'https://api.toladata.com';
-    if (!this.apiToken) {
-      console.warn('TolaData API token is not configured');
-    }
+  }
+
+  isConfigured() {
+    return !!this.apiToken;
   }
 
   async request(path, method = 'GET', body = null, params = {}) {

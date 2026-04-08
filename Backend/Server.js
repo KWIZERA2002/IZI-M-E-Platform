@@ -338,8 +338,13 @@ app.get('/accept-invite', (req, res) => {
   res.send(html);
 });
 
-// Catch-all route - serve the frontend HTML file
+// Catch-all route - serve the frontend HTML file (only for non-API routes)
 app.get('*', (req, res) => {
+  // Don't serve HTML for API requests or missing routes
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ error: 'Route not found' });
+  }
+  // Serve frontend for all other requests
   res.sendFile(path.join(frontendPath, 'IZI-ME-Platform.html'));
 });
 

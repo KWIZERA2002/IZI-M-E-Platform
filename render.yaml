@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: izi-me-platform
+    runtime: node
+    plan: free
+    rootDir: .
+    buildCommand: npm run install-all
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: izi-me-platform-db
+          property: connectionString
+
+databases:
+  - name: izi-me-platform-db
+    plan: free
+    databaseName: izi_me_platform
+    user: izi_me_platform_user

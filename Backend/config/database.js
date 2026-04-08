@@ -283,9 +283,26 @@ function createPostgresPool(connectionString) {
   return pool;
 }
 
-const pool = isSqliteUrl(DATABASE_URL)
-  ? createSqliteClient(DATABASE_URL.replace('sqlite://', ''))
-  : createPostgresPool(DATABASE_URL);
+const pool = (() => {
+  try {
+    const isUsingSqlite = isSqliteUrl(DATABASE_URL);
+    console.log(`[DB] Using database: ${isUsingSqlite ? 'SQLite' : 'PostgreSQL'}`);
+    console.log(`[DB] URL: ${isUsingSqlite ? DEFAULT_SQLITE_PATH : (DATABASE_URL || 'NOT SET')}`);
+    
+    const createdPool = isUsingSqlite
+      ? createSqliteClient(DATABASE_URL.replace('sqlite://', ''))
+      : createPostgresPool(DATABASE_URL);
+    
+    if (!createdPool.initializeSchema) {
+      createdPool.initializeSchema = async () => {};
+    }
+    
+    return createdPool;
+  } catch (error) {
+    console.error('[DB] Pool initialization error:', error.message);
+    throw error;
+  }
+})();
 
 if (!pool.ready) {
   pool.ready = Promise.resolve();

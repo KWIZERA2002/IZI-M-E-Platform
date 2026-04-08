@@ -7,6 +7,7 @@
     "start": "cd Backend && npm start",
     "dev": "cd Backend && npm run dev",
     "install-all": "npm install && cd Backend && npm install",
+    "db:init": "node Backend/run-schema.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [

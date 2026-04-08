@@ -240,14 +240,32 @@ function createPostgresPool(connectionString) {
     ssl: useSsl ? { rejectUnauthorized: false } : false,
   });
 
-  pool.ready = (async () => {
-    if (!fs.existsSync(POSTGRES_SCHEMA_PATH)) {
-      throw new Error(`Postgres schema file not found at ${POSTGRES_SCHEMA_PATH}`);
+  pool.initializeSchema = async () => {
+    if (pool._schemaInitialized) return;
+
+    const schemaPath = path.join(__dirname, '..', '..', 'Database', 'Schema.sql');
+    if (!fs.existsSync(schemaPath)) {
+      throw new Error(`Schema file not found at ${schemaPath}`);
     }
 
-    const schemaSql = fs.readFileSync(POSTGRES_SCHEMA_PATH, 'utf8');
-    await pool.query(schemaSql);
-  })();
+    try {
+      const schemaSql = fs.readFileSync(schemaPath, 'utf8');
+      const statements = schemaSql
+        .split(';')
+        .map((stmt) => stmt.trim())
+        .filter((stmt) => stmt.length > 0);
+
+      for (const statement of statements) {
+        await pool.query(statement);
+      }
+
+      pool._schemaInitialized = true;
+      console.log('[DB] Postgres schema initialized successfully');
+    } catch (error) {
+      console.error('[DB] Schema initialization error:', error.message);
+      throw error;
+    }
+  };
 
   return pool;
 }

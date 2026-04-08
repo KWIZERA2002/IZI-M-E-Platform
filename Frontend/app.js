@@ -564,6 +564,9 @@ function tryParseJSON(str, fallback) {
 }
 
 function normalizeFarmer(farmer) {
+  const explicitProject = String(farmer.project || '').trim();
+  const inferredProject = explicitProject ? '' : inferFarmerProject(farmer);
+  const resolvedProject = explicitProject || inferredProject;
   return {
     id: farmer.id,
     identifier: farmer.identifier || '',
@@ -572,13 +575,61 @@ function normalizeFarmer(farmer) {
     province: farmer.province || '',
     district: farmer.district || '',
     sector: farmer.sector || '',
-    project: farmer.project || '',
+    project: resolvedProject,
+    projectRaw: explicitProject,
+    projectInferred: inferredProject,
     phone: farmer.phone || '',
     status: farmer.status || 'active',
     sex: farmer.sex || 'M',
     age: farmer.age || '',
     location: farmer.location || '',
   };
+}
+
+function findProjectNameByAliases(aliases) {
+  const list = Array.isArray(DB.projects) ? DB.projects : [];
+  const keys = (aliases || []).map(normalizeProjectKey).filter(Boolean);
+  for (const project of list) {
+    const projectTokens = [project?.name, project?.full_name, project?.fullName]
+      .map(normalizeProjectKey)
+      .filter(Boolean);
+    if (keys.some((key) => projectTokens.some((token) => token === key || token.includes(key) || key.includes(token)))) {
+      return project.name || String(aliases[0] || '').toUpperCase();
+    }
+  }
+  return String(aliases[0] || '').toUpperCase();
+}
+
+function inferFarmerProject(farmer) {
+  const text = [
+    farmer?.project,
+    farmer?.province,
+    farmer?.district,
+    farmer?.sector,
+    farmer?.location,
+    farmer?.cooperative,
+  ].join(' ').toLowerCase();
+
+  if (!text.trim()) return '';
+
+  const psacDistricts = [
+    'rutsiro', 'nyamasheke', 'nyabihu', 'rusizi', 'karongi',
+    'nyaruguru', 'nyamagabe', 'huye', 'nyanza', 'ruhango',
+    'rwamagana', 'bugesera', 'musanze', 'rulindo'
+  ];
+  const kiiwpDistricts = ['kayonza'];
+
+  const hasPsacSignal = psacDistricts.some((district) => text.includes(district));
+  const hasKiiwpSignal = kiiwpDistricts.some((district) => text.includes(district));
+
+  if (hasPsacSignal && !hasKiiwpSignal) {
+    return findProjectNameByAliases(['PSAC']);
+  }
+  if (hasKiiwpSignal && !hasPsacSignal) {
+    return findProjectNameByAliases(['KIIWP']);
+  }
+
+  return '';
 }
 
 function normalizeIndicator(indicator) {
@@ -678,6 +729,50 @@ function deriveIndicatorsFromProjects(projects) {
     });
   });
   return rows.filter(row => row.name);
+}
+
+function deriveFieldActivitiesFromProjects(projects) {
+  const rows = [];
+  (projects || []).forEach((project) => {
+    const activities = Array.isArray(project?.key_activities) ? project.key_activities : [];
+    activities.forEach((text, index) => {
+      rows.push({
+        id: `planned-${project.id || project.name}-${index + 1}`,
+        project: project.name || '',
+        type: 'Planned Activity',
+        location: project.location || '',
+        plannedDate: project.start_date || '',
+        actualDate: '',
+        team: [],
+        outputs: String(text || '').trim(),
+        findings: '',
+        status: 'planning',
+        _derivedProfile: true,
+      });
+    });
+  });
+  return rows.filter(row => row.outputs);
+}
+
+function buildUnifiedIndicators() {
+  const logged = Array.isArray(DB.indicators) ? DB.indicators : [];
+  const derived = deriveIndicatorsFromProjects(DB.projects || []);
+  const seen = new Set(
+    logged.map((i) => `${normalizeProjectKey(i.project)}::${String(i.name || '').toLowerCase().trim()}`)
+  );
+  const missingDerived = derived.filter((d) => {
+    const key = `${normalizeProjectKey(d.project)}::${String(d.name || '').toLowerCase().trim()}`;
+    return !seen.has(key);
+  }).map((d) => ({ ...d, _derivedProfile: true }));
+  return [...logged, ...missingDerived];
+}
+
+function buildUnifiedFieldActivities() {
+  const logged = Array.isArray(DB.fieldActivities) ? DB.fieldActivities : [];
+  const derived = deriveFieldActivitiesFromProjects(DB.projects || []);
+  const hasLoggedByProject = new Set(logged.map((a) => normalizeProjectKey(a.project)));
+  const projectFallback = derived.filter((d) => !hasLoggedByProject.has(normalizeProjectKey(d.project)));
+  return [...logged, ...projectFallback];
 }
 
 async function loadBackendData() {
@@ -1102,8 +1197,8 @@ function projectCard(p){
 }
 function renderProjectDetail(p){
   const tabs = ['overview', 'details', 'activities', 'indicators', 'partners'];
-  const projInds = DB.indicators.filter(i => projectMatches(i.project, p));
-  const projActivities = (Array.isArray(DB.fieldActivities) ? DB.fieldActivities : [])
+  const projInds = buildUnifiedIndicators().filter(i => projectMatches(i.project, p));
+  const projActivities = buildUnifiedFieldActivities()
     .filter(a => projectMatches(a.project, p));
 
   return `
@@ -1204,7 +1299,10 @@ function renderProjectDetail(p){
         <td class="mono" style="font-size:11px">${esc(a.plannedDate || '—')}</td>
         <td class="mono" style="font-size:11px;color:${a.actualDate?'var(--green)':'var(--text3)'}">${esc(a.actualDate || '—')}</td>
         <td>${badge(a.status)}</td>
-        <td><div style="display:flex;gap:4px"><button class="icon-btn" onclick="App.openFieldForm(${a.id})">${ico('edit',13)}</button><button class="icon-btn" onclick="App.deleteField(${a.id})">${ico('trash',13)}</button></div></td>
+        <td><div style="display:flex;gap:4px">${a._derivedProfile
+          ? `<button class="btn btn-ghost btn-xs" onclick="App.openFieldForm(null, '${esc(a.project)}')">${ico('plus',11)} Log Actual</button>`
+          : `<button class="icon-btn" onclick="App.openFieldForm(${a.id})">${ico('edit',13)}</button><button class="icon-btn" onclick="App.deleteField(${a.id})">${ico('trash',13)}</button>`}
+        </div></td>
       </tr>`).join('')}</tbody>
     </table></div>` : `<div class="empty">No field activities logged for this project yet. <button class="btn btn-ghost btn-sm" onclick="App.openFieldForm(null, '${esc(p.name)}')">Log first activity</button></div>`}
   </div>
@@ -1257,7 +1355,10 @@ function renderProjectDetail(p){
             <td style="font-weight:600;color:${col}">${fmt(ind.current)}</td>
             <td style="min-width:120px"><div style="display:flex;align-items:center;gap:6px"><div style="flex:1">${progBar(p2, col)}</div><span class="mono" style="color:${col}">${p2}%</span></div></td>
             <td>${esc(ind.frequency)}</td>
-            <td><div style="display:flex;gap:4px"><button class="icon-btn" onclick="App.openIndicatorForm(${ind.id})">${ico('edit',13)}</button><button class="icon-btn" onclick="App.deleteIndicator(${ind.id})">${ico('trash',13)}</button></div></td>
+            <td><div style="display:flex;gap:4px">${ind._derivedProfile
+              ? `<button class="btn btn-ghost btn-xs" onclick="App.openIndicatorForm(null, '${esc(ind.project)}')">${ico('plus',11)} Add Measured</button>`
+              : `<button class="icon-btn" onclick="App.openIndicatorForm(${ind.id})">${ico('edit',13)}</button><button class="icon-btn" onclick="App.deleteIndicator(${ind.id})">${ico('trash',13)}</button>`}
+            </div></td>
           </tr>`;
         }).join('') : `<tr><td colspan="8" class="empty">No indicators for this project yet. <button class="btn btn-ghost btn-sm" onclick="App.openIndicatorForm(null, '${esc(p.name)}')">Add first indicator</button></td></tr>`}
       </tbody>
@@ -1298,15 +1399,16 @@ let _benPage=1;
 const _benPerPage=7;
 function renderBeneficiaries(search='',filterProj='All',filterSex='All'){
   const beneficiaries = DB.farmers.length ? DB.farmers : DB.beneficiaries;
+  const resolveProject = (b) => String(b.project || '').trim() || 'Unassigned';
   const projectOptions = Array.from(new Set([
     ...DB.projects.map(p => p.name),
-    ...beneficiaries.map(b => b.project).filter(Boolean)
+    ...beneficiaries.map(resolveProject).filter(Boolean)
   ])).sort();
   const s=(search||'').toLowerCase();
   const filtered=beneficiaries.filter(b=>{
     const idValue = (b.identifier || b.id || '').toString().toLowerCase();
     const ms=(b.name||'').toLowerCase().includes(s)||idValue.includes(s)||(b.cooperative||'').toLowerCase().includes(s)||(b.location||'').toLowerCase().includes(s);
-    return ms&&(filterProj==='All'||b.project===filterProj)&&(filterSex==='All'||b.sex===filterSex);
+    return ms&&(filterProj==='All'||resolveProject(b)===filterProj)&&(filterSex==='All'||b.sex===filterSex);
   });
   const pages=Math.ceil(filtered.length/_benPerPage)||1;
   if(_benPage>pages)_benPage=1;
@@ -1339,7 +1441,7 @@ function renderBeneficiaries(search='',filterProj='All',filterSex='All'){
     <td><span class="badge ${b.sex==='F'?'b-purple':'b-teal'}">${b.sex==='F'?'Female':'Male'}</span></td>
     <td>${b.age}</td><td>${esc(b.cooperative)}</td>
     <td style="font-size:12px">${esc(b.district)}, ${esc(b.province)}</td>
-    <td><span class="badge b-blue">${esc(b.project)}</span></td>
+    <td><span class="badge b-blue">${esc(resolveProject(b))}${b.projectInferred ? ' (derived)' : ''}</span></td>
     <td>${badge(b.status)}</td>
     <td><div style="display:flex;gap:4px"><button class="icon-btn" onclick="App.openBenForm('${b.id}')">${ico('edit',13)}</button><button class="icon-btn" onclick="App.deleteBen('${b.id}')">${ico('trash',13)}</button></div></td>
   </tr>`).join(''):`<tr><td colspan="9" class="empty">No records match your search</td></tr>`}</tbody>
@@ -1355,7 +1457,7 @@ ${pages>1?`<div style="display:flex;justify-content:center;align-items:center;ga
 // â”€â”€ INDICATORS â”€â”€
 function renderIndicators(search='',filterProj='All'){
   const s=(search||'').toLowerCase();
-  const sourceIndicators = (DB.indicators && DB.indicators.length) ? DB.indicators : deriveIndicatorsFromProjects(DB.projects);
+  const sourceIndicators = buildUnifiedIndicators();
   const selectedProject = filterProj === 'All' ? null : (DB.projects.find(p => p.name === filterProj) || { name: filterProj, full_name: filterProj });
   const filtered = sourceIndicators.filter(i => {
     const projectOk = filterProj === 'All' || projectMatches(i.project, selectedProject);
@@ -1388,7 +1490,10 @@ function renderIndicators(search='',filterProj='All'){
     <td style="font-weight:700;color:${col}">${fmt(ind.current)}</td>
     <td style="min-width:130px"><div style="display:flex;align-items:center;gap:6px"><div style="flex:1">${progBar(p2,col)}</div><span class="mono" style="color:${col}">${p2}%</span></div></td>
     <td>${esc(ind.frequency)}</td>
-    <td><div style="display:flex;gap:4px"><button class="icon-btn" onclick="App.openIndicatorForm(${ind.id})">${ico('edit',13)}</button><button class="icon-btn" onclick="App.deleteIndicator(${ind.id})">${ico('trash',13)}</button></div></td>
+    <td><div style="display:flex;gap:4px">${ind._derivedProfile
+      ? `<button class="btn btn-ghost btn-xs" onclick="App.openIndicatorForm(null, '${esc(ind.project)}')">${ico('plus',11)} Add Measured</button>`
+      : `<button class="icon-btn" onclick="App.openIndicatorForm(${ind.id})">${ico('edit',13)}</button><button class="icon-btn" onclick="App.deleteIndicator(${ind.id})">${ico('trash',13)}</button>`}
+    </div></td>
   </tr>`}).join('') : `<tr><td colspan="9" class="empty">No indicators available yet for this selection. Add one to get started.</td></tr>`}</tbody>
 </table></div>
 </div>`;
@@ -1438,11 +1543,13 @@ ${!filtered.length?'<div class="empty">No entries match the selected filters</di
 
 // â”€â”€ FIELD ACTIVITIES â”€â”€
 function renderField(filterProj='All'){
-  const filtered=DB.fieldActivities.filter(a=>filterProj==='All'||a.project===filterProj);
+  const sourceActivities = buildUnifiedFieldActivities();
+  const selectedProject = filterProj === 'All' ? null : (DB.projects.find(p => p.name === filterProj) || { name: filterProj, full_name: filterProj });
+  const filtered = sourceActivities.filter(a => filterProj === 'All' || projectMatches(a.project, selectedProject));
   return `
 <div class="fade">
 <div class="section-head">
-  <div><div class="section-title">Field Activities</div><div class="section-sub">${DB.fieldActivities.length} activities logged</div></div>
+  <div><div class="section-title">Field Activities</div><div class="section-sub">${sourceActivities.length} activities (logged + planned)</div></div>
   <div style="display:flex;gap:8px">
     <button class="btn btn-ghost btn-sm" onclick="App.exportCSV('field')">${ico('download',13)} Export</button>
     <button class="btn btn-primary btn-sm" onclick="App.openFieldForm()">${ico('plus',13)} Log Activity</button>
@@ -1462,8 +1569,11 @@ function renderField(filterProj='All'){
     <td style="font-size:12px">${esc((a.team||[]).join(', '))}</td>
     <td style="font-size:12px;color:var(--text2);max-width:160px">${esc(a.outputs||'â€”')}</td>
     <td>${badge(a.status)}</td>
-    <td><div style="display:flex;gap:4px"><button class="icon-btn" onclick="App.openFieldForm(${a.id})">${ico('edit',13)}</button><button class="icon-btn" onclick="App.deleteField(${a.id})">${ico('trash',13)}</button></div></td>
-  </tr>`).join('')}</tbody>
+    <td><div style="display:flex;gap:4px">${a._derivedProfile
+      ? `<button class="btn btn-ghost btn-xs" onclick="App.openFieldForm(null, '${esc(a.project)}')">${ico('plus',11)} Log Actual</button>`
+      : `<button class="icon-btn" onclick="App.openFieldForm(${a.id})">${ico('edit',13)}</button><button class="icon-btn" onclick="App.deleteField(${a.id})">${ico('trash',13)}</button>`}
+    </div></td>
+  </tr>`).join('') || `<tr><td colspan="9" class="empty">No field activities available for this selection yet. <button class="btn btn-ghost btn-sm" onclick="App.openFieldForm(null${filterProj !== 'All' ? `, '${esc(filterProj)}'` : ''})">Log first activity</button></td></tr>`}</tbody>
 </table></div>
 </div>`;
 }

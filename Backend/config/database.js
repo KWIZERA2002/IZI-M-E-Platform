@@ -188,21 +188,29 @@ function createSqliteClient(filePath) {
     db.run('PRAGMA foreign_keys = ON');
     db.exec(SQLITE_SCHEMA, (err) => {
       if (err) throw err;
+      // Ensure users columns exist (backward compat)
       db.all("PRAGMA table_info(users)", (err2, rows) => {
         if (err2) return;
         const columns = rows.map(r => r.name);
-        if (!columns.includes('email')) {
-          db.run("ALTER TABLE users ADD COLUMN email TEXT");
-        }
-        if (!columns.includes('role')) {
-          db.run("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'viewer'");
-        }
-        if (!columns.includes('status')) {
-          db.run("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'active'");
-        }
-        if (!columns.includes('invite_generated_at')) {
-          db.run("ALTER TABLE users ADD COLUMN invite_generated_at DATETIME");
-        }
+        if (!columns.includes('email')) db.run("ALTER TABLE users ADD COLUMN email TEXT");
+        if (!columns.includes('role')) db.run("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'viewer'");
+        if (!columns.includes('status')) db.run("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'active'");
+        if (!columns.includes('invite_generated_at')) db.run("ALTER TABLE users ADD COLUMN invite_generated_at DATETIME");
+      });
+      // Ensure farmers columns exist (backward compat)
+      db.all("PRAGMA table_info(farmers)", (err3, rows3) => {
+        if (err3) return;
+        const cols = (rows3 || []).map(r => r.name);
+        if (!cols.includes('identifier')) db.run("ALTER TABLE farmers ADD COLUMN identifier TEXT");
+        if (!cols.includes('sex')) db.run("ALTER TABLE farmers ADD COLUMN sex TEXT DEFAULT 'M'");
+        if (!cols.includes('age')) db.run("ALTER TABLE farmers ADD COLUMN age INTEGER");
+        if (!cols.includes('cooperative')) db.run("ALTER TABLE farmers ADD COLUMN cooperative TEXT");
+        if (!cols.includes('phone')) db.run("ALTER TABLE farmers ADD COLUMN phone TEXT");
+        if (!cols.includes('project')) db.run("ALTER TABLE farmers ADD COLUMN project TEXT");
+        if (!cols.includes('province')) db.run("ALTER TABLE farmers ADD COLUMN province TEXT");
+        if (!cols.includes('district')) db.run("ALTER TABLE farmers ADD COLUMN district TEXT");
+        if (!cols.includes('sector')) db.run("ALTER TABLE farmers ADD COLUMN sector TEXT");
+        if (!cols.includes('status')) db.run("ALTER TABLE farmers ADD COLUMN status TEXT DEFAULT 'active'");
       });
     });
   });

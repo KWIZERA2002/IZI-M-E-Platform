@@ -375,12 +375,27 @@ async function startServer() {
     if (pool.initializeSchema) {
       await pool.initializeSchema();
     }
-    
+
+    // Auto-seed PSAC and KIIWP farmer data if not yet present
+    try {
+      const check = await pool.query("SELECT COUNT(*) AS cnt FROM farmers WHERE project IN ('PSAC','KIIWP')");
+      const cnt = parseInt(check.rows[0]?.cnt ?? check.rows[0]?.['COUNT(*)'] ?? 0, 10);
+      if (cnt < 10) {
+        console.log('[SERVER] Seeding PSAC/KIIWP farmer data...');
+        const seedFarmers = require('./seed-farmers');
+        if (typeof seedFarmers === 'function') await seedFarmers();
+      } else {
+        console.log(`[SERVER] Farmer data already present (${cnt} PSAC/KIIWP records)`);
+      }
+    } catch (seedErr) {
+      console.warn('[SERVER] Farmer seed skipped:', seedErr.message);
+    }
+
     // Test database connection
     console.log('[SERVER] Testing database connection...');
-    const testQuery = await pool.query('SELECT 1 as test');
+    await pool.query('SELECT 1 as test');
     console.log('[SERVER] Database connection verified ✓');
-    
+
     app.listen(PORT, () => {
       console.log(`[SERVER] Running on port ${PORT} 🚀`);
       console.log(`[SERVER] API: http://localhost:${PORT}/api`);

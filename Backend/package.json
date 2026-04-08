@@ -4,7 +4,11 @@
   "main": "Server.js",
   "scripts": {
     "start": "node Server.js",
-    "dev": "nodemon Server.js"
+    "dev": "nodemon Server.js",
+    "seed:farmers": "node seed-farmers.js",
+    "seed:projects": "node seed-projects.js",
+    "db:init": "node run-schema.js",
+    "seed:all": "node run-schema.js && node seed-projects.js && node seed-farmers.js"
   },
   "dependencies": {
     "axios": "^1.14.0",

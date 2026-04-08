@@ -1,10 +1,35 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '.ENV') });
+require('./config/loadEnv');
 
 const app = express();
-app.use(cors());
+
+const configuredOrigins = String(process.env.FRONTEND_URL || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+const devOrigins = [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:5500',
+  'http://127.0.0.1:5500',
+  'http://localhost:8080',
+  'http://127.0.0.1:8080',
+];
+
+const allowedOrigins = new Set([...configuredOrigins, ...devOrigins]);
+
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin) return callback(null, true);
+    if (!allowedOrigins.size) return callback(null, true);
+    if (allowedOrigins.has(origin)) return callback(null, true);
+    return callback(new Error(`CORS blocked for origin ${origin}`));
+  },
+  optionsSuccessStatus: 200,
+}));
 app.use(express.json({ limit: '50mb' }));
 
 // Serve Frontend static files
@@ -19,6 +44,15 @@ app.use('/api/tasks', require('./Routes/tasks'));
 app.use('/api/kobo-sync', require('./Routes/kobo'));
 app.use('/api/admin', require('./Routes/Admin'));
 app.use('/api/integrations', require('./Routes/integrations'));
+
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    database: process.env.DATABASE_URL?.includes('sqlite') ? 'sqlite' : 'postgres',
+    frontendUrl: process.env.FRONTEND_URL || null,
+    timestamp: new Date().toISOString(),
+  });
+});
 
 // Debug endpoint - inspect database (dev only)
 app.get('/debug/db', async (req, res) => {

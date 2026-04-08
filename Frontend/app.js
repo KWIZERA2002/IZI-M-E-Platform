@@ -438,9 +438,13 @@ const AutomationEngine = {
 };
 
 // Backend API helpers
-const API_BASE = (window.location && window.location.origin && window.location.origin !== 'null')
-  ? `${window.location.origin}/api`
-  : 'http://localhost:5000/api';
+const configuredApiBase = String(window.IZI_CONFIG?.API_BASE || '').trim().replace(/\/$/, '');
+const isFileProtocol = window.location?.protocol === 'file:';
+const isLocalHost = ['localhost', '127.0.0.1'].includes(window.location?.hostname || '');
+const defaultApiBase = isFileProtocol || isLocalHost
+  ? 'http://localhost:5000/api'
+  : `${window.location.origin}/api`;
+const API_BASE = configuredApiBase || defaultApiBase;
 
 let importPreviewState = {
   type: 'beneficiaries',

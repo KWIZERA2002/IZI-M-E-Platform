@@ -5,8 +5,10 @@ build/
 
 # Environment files
 .env
+.ENV
 .env.local
 .env.*.local
+*.ENV
 
 # Database
 Backend/data/

@@ -3,7 +3,7 @@ const path = require('path');
 const sqlite3 = require('sqlite3').verbose();
 const { Pool } = require('pg');
 
-require('dotenv').config({ path: path.join(__dirname, '..', '.ENV') });
+require('./loadEnv');
 
 const DEFAULT_SQLITE_PATH = path.join(__dirname, '..', 'data', 'izi-me.db');
 const envUrl = process.env.DATABASE_URL || '';
@@ -226,7 +226,13 @@ function createSqliteClient(filePath) {
 }
 
 function createPostgresPool(connectionString) {
-  return new Pool({ connectionString });
+  const useSsl = String(process.env.PGSSL || process.env.DATABASE_SSL || '').toLowerCase() === 'true'
+    || String(process.env.NODE_ENV || '').toLowerCase() === 'production';
+
+  return new Pool({
+    connectionString,
+    ssl: useSsl ? { rejectUnauthorized: false } : false,
+  });
 }
 
 const pool = isSqliteUrl(DATABASE_URL)

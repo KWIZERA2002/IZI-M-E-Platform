@@ -50,9 +50,30 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     database: process.env.DATABASE_URL?.includes('sqlite') ? 'sqlite' : 'postgres',
+    dbConfigured: !!process.env.DATABASE_URL,
     frontendUrl: process.env.FRONTEND_URL || null,
     timestamp: new Date().toISOString(),
   });
+});
+
+app.get('/health/db', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT NOW() as current_time, version() as version');
+    res.json({
+      status: 'connected',
+      database: process.env.DATABASE_URL?.includes('sqlite') ? 'sqlite' : 'postgres',
+      schemaInitialized: pool._schemaInitialized || false,
+      time: result.rows[0]?.current_time || 'N/A',
+      version: result.rows[0]?.version || 'N/A'
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      message: error.message,
+      database: process.env.DATABASE_URL?.includes('sqlite') ? 'sqlite' : 'postgres',
+      schemaInitialized: pool._schemaInitialized || false
+    });
+  }
 });
 
 // Debug endpoint - inspect database (dev only)

@@ -8,7 +8,8 @@ const emailFrom = process.env.EMAIL_FROM || process.env.SMTP_FROM || process.env
 const appUrl = (process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || process.env.FRONTEND_URL || 'http://localhost:5000').replace(/\/$/, '');
 const manualDisable = String(process.env.DISABLE_EMAIL || '').toLowerCase() === 'true';
 
-const emailDisabled = manualDisable || !smtpHost || !smtpUser || !smtpPass || !emailFrom;
+const hasAuth = !!(smtpUser && smtpPass);
+const emailDisabled = manualDisable || !smtpHost || !emailFrom;
 
 const transporter = emailDisabled
   ? null
@@ -16,19 +17,17 @@ const transporter = emailDisabled
       host: smtpHost,
       port: smtpPort,
       secure: smtpPort === 465,
-      auth: {
+      auth: hasAuth ? {
         user: smtpUser,
         pass: smtpPass
-      }
+      } : undefined
     });
 
 if (!emailDisabled) {
-  console.log(`[Mail] SMTP configured and ready (${smtpHost}:${smtpPort})`);
+  console.log(`[Mail] SMTP configured and ready (${smtpHost}:${smtpPort})${hasAuth ? ' with auth' : ' without auth'}`);
 } else {
   const missing = [];
   if (!smtpHost) missing.push('SMTP_HOST/SMTP_SERVER');
-  if (!smtpUser) missing.push('SMTP_USER/SMTP_USERNAME');
-  if (!smtpPass) missing.push('SMTP_PASS/SMTP_PASSWORD');
   if (!emailFrom) missing.push('EMAIL_FROM');
   console.warn('[Mail] Email sending disabled. Missing config:', missing.join(', ') || 'DISABLE_EMAIL=true');
 }

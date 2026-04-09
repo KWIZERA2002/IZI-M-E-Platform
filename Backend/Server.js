@@ -174,7 +174,7 @@ app.get('/verify', (req, res) => {
             if (response.ok) {
               document.getElementById('status').innerHTML = '<p class="success">✓ Email verified successfully! Redirecting...</p>';
               localStorage.setItem('token', data.token);
-              setTimeout(() => window.location.href = '/?token=' + encodeURIComponent(data.token) + '&source=verify', 1200);
+              setTimeout(() => window.location.href = '/IZI-ME-Platform.html?token=' + encodeURIComponent(data.token) + '&source=verify', 1200);
             } else {
               document.getElementById('status').innerHTML = '<p class="error">✗ ' + data.error + '</p>';
             }
@@ -330,7 +330,7 @@ app.get('/accept-invite', (req, res) => {
               localStorage.setItem('token', d.token);
               showMsg('Welcome, ' + (d.user.username || username) + '! Redirecting to the platform...', 'success');
               document.getElementById('form').style.display = 'none';
-              setTimeout(() => window.location.href = '/?token=' + encodeURIComponent(d.token) + '&source=invite', 1200);
+              setTimeout(() => window.location.href = '/IZI-ME-Platform.html?token=' + encodeURIComponent(d.token) + '&source=invite', 1200);
             } else {
               showMsg(d.error || 'Could not complete setup. Please try again.', 'error');
               btn.disabled = false;

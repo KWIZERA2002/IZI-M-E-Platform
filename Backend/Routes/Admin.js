@@ -75,6 +75,12 @@ function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ''));
 }
 
+function getPublicBaseUrl(req) {
+  const configured = process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || process.env.FRONTEND_URL;
+  if (configured) return String(configured).replace(/\/$/, '');
+  return `${req.protocol}://${req.get('host')}`;
+}
+
 async function generateUniqueUsername(baseValue, excludeUserId = null) {
   const base = String(baseValue || 'user')
     .trim()
@@ -662,7 +668,7 @@ router.post('/users', auth, requirePermission('users:create'), async (req, res) 
     const verificationExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     const inviteGeneratedAt = new Date().toISOString();
     const invitePath = `/accept-invite?token=${verificationToken}`;
-    const fallbackInviteUrl = `${req.protocol}://${req.get('host')}${invitePath}`;
+    const fallbackInviteUrl = `${getPublicBaseUrl(req)}${invitePath}`;
 
     if (existingUser && Number(existingUser.email_verified) === 1) {
       return res.status(400).json({ error: 'A verified user with that email already exists' });
@@ -756,7 +762,7 @@ router.post('/users/:id/resend-invite', auth, requirePermission('users:invite'),
     const verificationExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     const inviteGeneratedAt = new Date().toISOString();
     const invitePath = `/accept-invite?token=${verificationToken}`;
-    const fallbackInviteUrl = `${req.protocol}://${req.get('host')}${invitePath}`;
+    const fallbackInviteUrl = `${getPublicBaseUrl(req)}${invitePath}`;
 
     await pool.query(
       'UPDATE users SET verification_token = $1, verification_expires = $2, invite_generated_at = $3, email_verified = FALSE WHERE id = $4',

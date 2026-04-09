@@ -7,6 +7,7 @@
     "start": "cd Backend && npm start",
     "dev": "cd Backend && npm run dev",
     "install-all": "npm install && cd Backend && npm install",
+    "import:excel": "cd Backend && npm run import:excel",
     "db:init": "node Backend/run-schema.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },

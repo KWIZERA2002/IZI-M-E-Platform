@@ -192,6 +192,33 @@ async function importFarmers(records) {
     throw error;
   }
   return inserted;
+async function importFarmers(records) {
+  let inserted = 0;
+  for (const r of records) {
+    await pool.query(
+      `INSERT INTO farmers (identifier, name, sex, cooperative, province, district, sector, phone, project, location, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [
+        r.identifier || null,
+        r.name || null,
+        r.sex || 'M',
+        r.cooperative || null,
+        r.province || null,
+        r.district || null,
+        r.sector || null,
+        r.phone || null,
+        r.project || null,
+        r.location || null,
+        r.status || 'active',
+      ]
+    );
+    inserted += 1;
+    if (inserted % 1000 === 0) {
+      console.log(`Inserted ${inserted}/${records.length}...`);
+    }
+  }
+  return inserted;
+}
 }
 
 async function main() {

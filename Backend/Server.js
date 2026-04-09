@@ -407,6 +407,14 @@ async function startServer() {
     }
 
     // Test database connection
+        // Log current farmer count (real data must be loaded via seed-production.js)
+        try {
+          const check = await pool.query("SELECT COUNT(*) AS cnt FROM farmers");
+          const cnt = parseInt(check.rows[0]?.cnt ?? check.rows[0]?.['COUNT(*)'] ?? 0, 10);
+          console.log(`[SERVER] Farmer records in DB: ${cnt}`);
+        } catch (_) { /* non-critical */ }
+
+        // Test database connection
     console.log('[SERVER] Testing database connection...');
     await pool.query('SELECT 1 as test');
     console.log('[SERVER] Database connection verified ✓');

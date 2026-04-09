@@ -4,6 +4,7 @@
   "main": "Server.js",
   "scripts": {
     "start": "node Server.js",
+    "seed:prod": "node seed-production.js",
     "dev": "nodemon Server.js",
     "import:excel": "node import-excel-data.js",
     "seed:farmers": "node seed-farmers.js",

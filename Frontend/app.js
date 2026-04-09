@@ -2107,6 +2107,17 @@ window.App = {
   async init(){
     buildNav();
     this.updateUserDisplay();
+    const params = new URLSearchParams(window.location.search);
+    const urlToken = params.get('token');
+    if (urlToken) {
+      localStorage.setItem('token', urlToken);
+      params.delete('token');
+      params.delete('source');
+      const remaining = params.toString();
+      const nextUrl = remaining ? `${window.location.pathname}?${remaining}` : window.location.pathname;
+      window.history.replaceState({}, '', nextUrl);
+    }
+
     const token = localStorage.getItem('token');
     if (!token) {
       this.showLogin();

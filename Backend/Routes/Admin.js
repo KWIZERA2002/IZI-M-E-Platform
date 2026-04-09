@@ -686,10 +686,13 @@ router.post('/users', auth, requirePermission('users:create'), async (req, res) 
         sendResult = await sendInviteEmail(email, normalizedName, verificationToken);
       } catch (mailErr) {
         console.warn('[Admin Invite] Failed to resend invitation email:', mailErr.message);
+        sendResult = { success: false, skipped: false, error: mailErr.message };
       }
       return res.json({
         ...userRow,
-        message: sendResult.skipped ? 'Invitation refreshed. Email sending is disabled; share the invite link manually.' : 'Invitation resent successfully.',
+        message: sendResult.success
+          ? (sendResult.skipped ? 'Invitation refreshed. Email sending is disabled; share the invite link manually.' : 'Invitation resent successfully.')
+          : 'Invitation refreshed, but email delivery failed. Please share the invite link manually and check SMTP settings.',
         inviteResent: true,
         previousInviteInvalidated: !!existingUser.verification_token,
         invitePath,
@@ -711,11 +714,14 @@ router.post('/users', auth, requirePermission('users:create'), async (req, res) 
       sendResult = await sendInviteEmail(email, normalizedName, verificationToken);
     } catch (mailErr) {
       console.warn('[Admin Invite] Failed to send invitation email:', mailErr.message);
+      sendResult = { success: false, skipped: false, error: mailErr.message };
     }
 
     res.json({
       ...userRow,
-      message: sendResult.skipped ? 'User invited. Email sending is disabled; share the invite link manually.' : 'Invitation email sent successfully.',
+      message: sendResult.success
+        ? (sendResult.skipped ? 'User invited. Email sending is disabled; share the invite link manually.' : 'Invitation email sent successfully.')
+        : 'User invited, but email delivery failed. Please share the invite link manually and check SMTP settings.',
       inviteResent: false,
       previousInviteInvalidated: false,
       invitePath,
@@ -762,6 +768,7 @@ router.post('/users/:id/resend-invite', auth, requirePermission('users:invite'),
       sendResult = await sendInviteEmail(user.email, user.username, verificationToken);
     } catch (mailErr) {
       console.warn('[Admin Invite] Failed to resend invitation email:', mailErr.message);
+      sendResult = { success: false, skipped: false, error: mailErr.message };
     }
 
     res.json({
@@ -776,7 +783,9 @@ router.post('/users/:id/resend-invite', auth, requirePermission('users:invite'),
       invitePath,
       inviteUrl: fallbackInviteUrl,
       emailInviteUrl: sendResult.inviteUrl || null,
-      message: sendResult.skipped ? 'Invitation refreshed. Email sending is disabled; share the invite link manually.' : 'Invitation resent successfully.'
+      message: sendResult.success
+        ? (sendResult.skipped ? 'Invitation refreshed. Email sending is disabled; share the invite link manually.' : 'Invitation resent successfully.')
+        : 'Invitation refreshed, but email delivery failed. Please share the invite link manually and check SMTP settings.'
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

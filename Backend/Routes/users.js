@@ -5,9 +5,9 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const pool = require('../config/database');
 const auth = require('../MIDDLEWARE/Auth');
-const { sendVerificationEmail, sendPasswordResetEmail } = require('../Services/EmailService');
+const { sendVerificationEmail, sendPasswordResetEmail, isEmailEnabled } = require('../Services/EmailService');
 
-const emailDisabled = process.env.NODE_ENV === 'development' || !process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS || !process.env.EMAIL_FROM;
+const emailDisabled = !isEmailEnabled;
 
 function normalizeEmail(value) {
   return String(value || '').trim().toLowerCase();

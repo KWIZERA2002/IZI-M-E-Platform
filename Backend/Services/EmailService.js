@@ -1,30 +1,47 @@
 const nodemailer = require('nodemailer');
 
-const emailDisabled = process.env.NODE_ENV === 'development' || !process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS || !process.env.EMAIL_FROM;
+const smtpHost = process.env.SMTP_HOST || process.env.SMTP_SERVER || process.env.MAIL_HOST || '';
+const smtpPort = Number(process.env.SMTP_PORT || process.env.MAIL_PORT || 587);
+const smtpUser = process.env.SMTP_USER || process.env.SMTP_USERNAME || process.env.MAIL_USER || process.env.EMAIL_USER || '';
+const smtpPass = process.env.SMTP_PASS || process.env.SMTP_PASSWORD || process.env.MAIL_PASS || process.env.EMAIL_PASSWORD || '';
+const emailFrom = process.env.EMAIL_FROM || process.env.SMTP_FROM || process.env.MAIL_FROM || smtpUser || '';
+const appUrl = (process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || process.env.FRONTEND_URL || 'http://localhost:5000').replace(/\/$/, '');
+const manualDisable = String(process.env.DISABLE_EMAIL || '').toLowerCase() === 'true';
 
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: process.env.SMTP_PORT,
-  secure: false,
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS
-  }
-});
+const emailDisabled = manualDisable || !smtpHost || !smtpUser || !smtpPass || !emailFrom;
+
+const transporter = emailDisabled
+  ? null
+  : nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpPort === 465,
+      auth: {
+        user: smtpUser,
+        pass: smtpPass
+      }
+    });
 
 if (!emailDisabled) {
-  console.log('[Mail] SMTP configured and ready');
+  console.log(`[Mail] SMTP configured and ready (${smtpHost}:${smtpPort})`);
+} else {
+  const missing = [];
+  if (!smtpHost) missing.push('SMTP_HOST/SMTP_SERVER');
+  if (!smtpUser) missing.push('SMTP_USER/SMTP_USERNAME');
+  if (!smtpPass) missing.push('SMTP_PASS/SMTP_PASSWORD');
+  if (!emailFrom) missing.push('EMAIL_FROM');
+  console.warn('[Mail] Email sending disabled. Missing config:', missing.join(', ') || 'DISABLE_EMAIL=true');
 }
 
 const sendVerificationEmail = async (email, username, token) => {
-  const verifyUrl = `${process.env.APP_URL}/verify?token=${token}`;
+  const verifyUrl = `${appUrl}/verify?token=${token}`;
   if (emailDisabled) {
     console.log('Email sending disabled. Verification URL:', verifyUrl);
     return { success: true, skipped: true, verifyUrl };
   }
 
   const mailOptions = {
-    from: process.env.EMAIL_FROM,
+    from: emailFrom,
     to: email,
     subject: 'Verify Your IZI M&E Platform Account',
     html: `
@@ -58,14 +75,14 @@ const sendVerificationEmail = async (email, username, token) => {
 };
 
 const sendPasswordResetEmail = async (email, username, resetToken) => {
-  const resetUrl = `${process.env.APP_URL}/reset-password?token=${resetToken}`;
+  const resetUrl = `${appUrl}/reset-password?token=${resetToken}`;
   if (emailDisabled) {
     console.log('Password reset email disabled. Reset URL:', resetUrl);
     return { success: true, skipped: true, resetUrl };
   }
 
   const mailOptions = {
-    from: process.env.EMAIL_FROM,
+    from: emailFrom,
     to: email,
     subject: 'Reset Your IZI M&E Platform Password',
     html: `
@@ -98,14 +115,14 @@ const sendPasswordResetEmail = async (email, username, resetToken) => {
 };
 
 const sendInviteEmail = async (email, name, token) => {
-  const inviteUrl = `${process.env.APP_URL}/accept-invite?token=${token}`;
+  const inviteUrl = `${appUrl}/accept-invite?token=${token}`;
   if (emailDisabled) {
     console.log('Email sending disabled. Invitation URL:', inviteUrl);
     return { success: true, skipped: true, inviteUrl };
   }
 
   const mailOptions = {
-    from: process.env.EMAIL_FROM,
+    from: emailFrom,
     to: email,
     subject: "You've been invited to IZI M&E Platform",
     html: `
@@ -139,4 +156,9 @@ const sendInviteEmail = async (email, name, token) => {
   }
 };
 
-module.exports = { sendVerificationEmail, sendPasswordResetEmail, sendInviteEmail };
+module.exports = {
+  sendVerificationEmail,
+  sendPasswordResetEmail,
+  sendInviteEmail,
+  isEmailEnabled: !emailDisabled
+};

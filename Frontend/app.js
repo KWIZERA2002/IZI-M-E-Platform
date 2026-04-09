@@ -816,11 +816,149 @@ function getReportMetrics(projectName) {
   };
 }
 
-function buildDonorAutoDraft(report) {
+function reportSectionEditorId(reportId, section) {
+  return `report-sec-${reportId}-${toReportFileToken(section).toLowerCase()}`;
+}
+
+function normalizeInlineRichText(line) {
+  const escaped = esc(line || '');
+  return escaped.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+}
+
+function richTextToHtml(value) {
+  const lines = String(value || '').split(/\r?\n/);
+  const chunks = [];
+  let inList = false;
+
+  const openList = () => {
+    if (!inList) {
+      chunks.push('<ul>');
+      inList = true;
+    }
+  };
+
+  const closeList = () => {
+    if (inList) {
+      chunks.push('</ul>');
+      inList = false;
+    }
+  };
+
+  lines.forEach((rawLine) => {
+    const line = String(rawLine || '');
+    const trimmed = line.trim();
+    if (!trimmed) {
+      closeList();
+      chunks.push('<p></p>');
+      return;
+    }
+
+    if (/^-\s+/.test(trimmed)) {
+      openList();
+      const itemText = trimmed.replace(/^-\s+/, '');
+      chunks.push(`<li>${normalizeInlineRichText(itemText)}</li>`);
+      return;
+    }
+
+    closeList();
+    chunks.push(`<p>${normalizeInlineRichText(trimmed)}</p>`);
+  });
+
+  closeList();
+  return chunks.join('');
+}
+
+function buildDonorAutoDraft(report, tone = 'formal') {
   const project = (DB.projects || []).find(p => p.name === report.project) || null;
   const metrics = getReportMetrics(report.project);
   const period = report.period || 'the reporting period';
   const projectTitle = project?.full_name || report.project;
+  const toneKey = ['formal', 'concise', 'technical'].includes(String(tone || '').toLowerCase())
+    ? String(tone || '').toLowerCase()
+    : 'formal';
+
+  if (toneKey === 'concise') {
+    return {
+      'Executive Summary':
+`During ${period}, ${projectTitle} delivered steady progress with ${metrics.indicatorCount} tracked indicators at an average ${metrics.avgProgress}% completion.
+The project reached ${metrics.beneficiaryCount} beneficiaries and completed ${metrics.completedActivityCount} field activities.`,
+      'Introduction':
+`This report provides a concise update on implementation performance for ${projectTitle} during ${period}.`,
+      'Narrative Progress Report (Objectives, Results, Key Metrics and Outcomes, Challenges and Solutions)':
+`Objectives:
+- Deliver planned outputs on schedule.
+- Improve beneficiary outcomes.
+
+Results:
+- Core implementation milestones progressed as planned.
+
+Key Metrics and Outcomes:
+- Indicators tracked: ${metrics.indicatorCount}
+- Average progress: ${metrics.avgProgress}%
+- Beneficiaries reached: ${metrics.beneficiaryCount}
+
+Challenges and Solutions:
+- Challenge: Field scheduling constraints.
+- Solution: Adaptive planning and tighter implementation follow-up.`,
+      'Impact Stories and Testimonials':
+`Story: Beneficiaries reported practical gains from project-supported interventions.
+Testimonial placeholders can be replaced with verified direct quotations.`,
+      'Budget':
+`Budget narrative placeholder:
+- Planned budget
+- Actual expenditure
+- Variance and reasons`,
+      'Lessons Learnt':
+`- Early stakeholder coordination accelerates delivery.
+- Routine data checks improve reporting quality.`,
+      'Future Outlook':
+`Next period focus: complete pending outputs, sustain delivery quality, and strengthen outcome evidence.`
+    };
+  }
+
+  if (toneKey === 'technical') {
+    return {
+      'Executive Summary':
+`For ${period}, ${projectTitle} recorded portfolio-level performance with ${metrics.indicatorCount} indicators monitored and mean attainment at ${metrics.avgProgress}%.
+Operational delivery covered ${metrics.beneficiaryCount} beneficiaries and ${metrics.completedActivityCount} completed field activities, with implementation risks actively managed through adaptive controls.`,
+      'Introduction':
+`${projectTitle} is implemented within a results-based management framework aligned to donor compliance and national development priorities.
+This period report synthesizes output delivery, outcome trajectory, financial execution, and implementation learning for ${period}.`,
+      'Narrative Progress Report (Objectives, Results, Key Metrics and Outcomes, Challenges and Solutions)':
+`Objectives:
+- Deliver output-level milestones according to the approved work plan and logframe.
+- Improve service quality and beneficiary-level outcomes through targeted interventions.
+
+Results:
+- Planned implementation packages were executed with continued stakeholder coordination.
+- Monitoring evidence was consolidated to support corrective action and adaptive management.
+
+Key Metrics and Outcomes:
+- Indicators monitored: ${metrics.indicatorCount}
+- Mean indicator attainment: ${metrics.avgProgress}%
+- Beneficiaries reached: ${metrics.beneficiaryCount}
+
+Challenges and Solutions:
+- Challenge: Periodic operational constraints affecting field sequencing.
+- Solution: Revised micro-planning, strengthened supervision cadence, and risk-triggered resource reallocation.`,
+      'Impact Stories and Testimonials':
+`Impact evidence placeholders:
+- Outcome case narrative demonstrating measurable beneficiary change.
+- Testimonial excerpts from beneficiaries and local partners for triangulated qualitative validation.`,
+      'Budget':
+`Financial narrative placeholders:
+- Approved budget envelope:
+- Period expenditure:
+- Variance analysis and justification:
+- Efficiency considerations (cost per output / delivery leverage):`,
+      'Lessons Learnt':
+`- Early governance alignment improves implementation velocity.
+- Data quality assurance at source reduces downstream reporting revisions.
+- Cross-functional review loops strengthen delivery accountability.`,
+      'Future Outlook':
+`The upcoming period will prioritize completion of critical path outputs, strengthened outcome verification, and tighter performance tracking against logframe milestones.`
+    };
+  }
 
   return {
     'Executive Summary':
@@ -972,7 +1110,7 @@ function buildReportHtml(report) {
     }
     return `
       <h2>${esc(section)}</h2>
-      <p>${esc(value || '').replace(/\n/g, '<br>')}</p>
+      ${richTextToHtml(value || '')}
     `;
   }).join('');
 
@@ -2032,6 +2170,11 @@ function renderReportEditor(r){
   <span style="font-family:var(--font-h);font-size:18px;font-weight:700;color:var(--text)">${esc(r.project)} â€” ${esc(donorLabel)} ${esc(r.period)}</span>
   <span class="ver-tag">${esc(r.version)}</span>${badge(r.status)}
   <div style="margin-left:auto;display:flex;gap:8px">
+    <select class="form-select" id="report-tone-${r.id}" style="min-width:170px" title="Auto draft tone">
+      <option value="formal">Formal donor tone</option>
+      <option value="concise">Concise tone</option>
+      <option value="technical">Technical tone</option>
+    </select>
     <button class="btn btn-ghost btn-sm" onclick="App.autoDraftReport(${r.id})">${ico('refresh',13)} Auto Draft</button>
     <button class="btn btn-ghost btn-sm" onclick="App.exportReportExcel(${r.id})">${ico('download',13)} Export Excel</button>
     <button class="btn btn-ghost btn-sm" onclick="App.exportReportWord(${r.id})">${ico('download',13)} Export Word</button>
@@ -2039,7 +2182,9 @@ function renderReportEditor(r){
     <button class="btn btn-success btn-sm" onclick="App.markReportSubmitted(${r.id})">${ico('check',13)} Mark Submitted</button>
   </div>
 </div>
-${Object.keys(r.content).map(section=>`
+${Object.keys(r.content).map(section=>{
+  const editorId = reportSectionEditorId(r.id, section);
+  return `
 <div class="donor-section-box">
   <div style="font-weight:600;color:var(--text);font-size:13px;margin-bottom:10px">${esc(section)}</div>
   ${r.content[section]==='auto'?`<div class="tbl-wrap"><table>
@@ -2051,8 +2196,17 @@ ${Object.keys(r.content).map(section=>`
       <td><div style="display:flex;align-items:center;gap:6px"><div style="width:80px">${progBar(p2,col)}</div><span class="mono" style="color:${col}">${p2}%</span></div></td>
     </tr>`}).join('')}</tbody>
   </table></div>`
-  :`<textarea class="form-textarea" rows="5" placeholder="Enter ${esc(section)} narrativeâ€¦" onchange="App.saveReportSection(${r.id},'${esc(section)}',this.value)">${esc(r.content[section]||'')}</textarea>`}
-</div>`).join('')}
+  :`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
+      <div style="font-size:11px;color:var(--text3)">Formatting tools</div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-xs" type="button" onclick="App.formatReportEditorText('${editorId}','bold')"><strong>B</strong> Bold</button>
+        <button class="btn btn-ghost btn-xs" type="button" onclick="App.formatReportEditorText('${editorId}','bullets')">• Bullets</button>
+      </div>
+    </div>
+    <textarea id="${editorId}" class="form-textarea" rows="6" placeholder="Enter ${esc(section)} narrativeâ€¦" onchange="App.saveReportSection(${r.id},'${esc(section)}',this.value)">${esc(r.content[section]||'')}</textarea>
+    <div style="font-size:11px;color:var(--text3);margin-top:4px">Tip: Use <strong>**bold text**</strong> and bullet lines that start with <strong>- </strong> for richer export output.</div>`}
+</div>`;
+}).join('')}
 </div>`;
 }
 
@@ -3199,10 +3353,50 @@ window.App = {
   closeReport(){_editingReport=null;this.renderPage();},
   markReportSubmitted(id){const r=DB.donorReports.find(x=>x.id===id);if(r){r.status='submitted';r.lastEdited=new Date().toISOString().slice(0,10);addAudit('Marked report submitted: '+r.project+' '+r.period,'update');}this.renderPage();},
   saveReportSection(id,section,val){const r=DB.donorReports.find(x=>x.id===id);if(r&&r.content){r.content[section]=val;r.lastEdited=new Date().toISOString().slice(0,10);}},
+  formatReportEditorText(editorId, mode){
+    const textarea = $(editorId);
+    if(!textarea) return;
+    const start = textarea.selectionStart || 0;
+    const end = textarea.selectionEnd || 0;
+    const value = textarea.value || '';
+    const selected = value.slice(start, end);
+
+    if(mode === 'bold'){
+      const text = selected || 'bold text';
+      const replacement = `**${text}**`;
+      textarea.value = value.slice(0, start) + replacement + value.slice(end);
+      const cursor = start + replacement.length;
+      textarea.focus();
+      textarea.setSelectionRange(cursor, cursor);
+    } else if(mode === 'bullets'){
+      if(selected){
+        const bulleted = selected
+          .split('\n')
+          .map(line => {
+            const trimmed = line.trim();
+            if(!trimmed) return line;
+            return /^-\s+/.test(trimmed) ? line : `- ${trimmed}`;
+          })
+          .join('\n');
+        textarea.value = value.slice(0, start) + bulleted + value.slice(end);
+        textarea.focus();
+        textarea.setSelectionRange(start, start + bulleted.length);
+      } else {
+        const insertion = '- ';
+        textarea.value = value.slice(0, start) + insertion + value.slice(end);
+        const cursor = start + insertion.length;
+        textarea.focus();
+        textarea.setSelectionRange(cursor, cursor);
+      }
+    }
+
+    textarea.dispatchEvent(new Event('change', { bubbles: true }));
+  },
   autoDraftReport(id){
     const report = DB.donorReports.find(x=>x.id===id);
     if(!report) return;
-    const draft = buildDonorAutoDraft(report);
+    const tone = $(`report-tone-${id}`)?.value || 'formal';
+    const draft = buildDonorAutoDraft(report, tone);
     Object.keys(draft).forEach((section) => {
       if (report.content[section] !== 'auto') {
         const existing = String(report.content[section] || '').trim();
@@ -3210,9 +3404,9 @@ window.App = {
       }
     });
     report.lastEdited = new Date().toISOString().slice(0,10);
-    addAudit('Auto-drafted donor report sections: '+report.project+' '+report.period,'update');
+    addAudit(`Auto-drafted donor report sections (${tone}): ${report.project} ${report.period}`,'update');
     this.renderPage();
-    alert('Draft narrative generated. You can now refine each section before export.');
+    alert(`Draft narrative generated using ${tone} tone. You can refine each section before export.`);
   },
   exportReportExcel(id){
     const report = DB.donorReports.find(x=>x.id===id);

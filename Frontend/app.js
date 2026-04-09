@@ -910,11 +910,20 @@ async function loadBackendData() {
     DB.currentUser = {
       id: user.id,
       name: user.username || user.name || 'User',
-      role: user.role || 'user',
+      email: user.email || '',
+      role: user.role || 'viewer',
       initials: (user.username || user.name || 'U').slice(0,2).toUpperCase(),
     };
+    // Update localStorage with latest user info
+    localStorage.setItem('currentUser', JSON.stringify(DB.currentUser));
   } else {
-    console.warn('Load current user failed:', results[1].reason || results[1].value);
+    // Try to load from localStorage if backend fails
+    const stored = localStorage.getItem('currentUser');
+    if (stored) {
+      DB.currentUser = JSON.parse(stored);
+    } else {
+      console.warn('Load current user failed:', results[1].reason || results[1].value);
+    }
   }
 
   if (results[4].status === 'fulfilled' && Array.isArray(results[4].value)) {
@@ -978,6 +987,18 @@ async function loadBackendData() {
 // UTILITIES
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 const $ = id => document.getElementById(id);
+function getRoleLabel(role) {
+  const labels = {
+    'admin': 'Administrator',
+    'm_e_officer': 'M&E Personnel',
+    'project_officer': 'Project Officer',
+    'project_coordinator': 'Project Coordinator',
+    'project_manager': 'Project Manager',
+    'data_clerk': 'Data Clerk',
+    'viewer': 'Viewer'
+  };
+  return labels[role] || role;
+}
 const pct = (c,t) => t ? Math.min(100,Math.round(c/t*100)) : 0;
 const fmt = n => typeof n==='number' ? n.toLocaleString() : (n||'');
 const fmtUSD = n => '$'+(n/1000).toFixed(0)+'k';
@@ -2085,6 +2106,7 @@ window.App = {
 
   async init(){
     buildNav();
+    this.updateUserDisplay();
     const token = localStorage.getItem('token');
     if (!token) {
       this.showLogin();
@@ -2093,13 +2115,34 @@ window.App = {
 
     try {
       await loadBackendData();
+      this.updateUserDisplay();
       this.openPage('dashboard');
       this.updateTaskBadge();
     } catch (err) {
       console.warn('Backend load failed:', err);
       localStorage.removeItem('token');
+      localStorage.removeItem('currentUser');
       this.showLogin();
     }
+  },
+
+  updateUserDisplay(){
+    const user = DB.currentUser || JSON.parse(localStorage.getItem('currentUser') || '{}');
+    if (!user.name) return;
+
+    const avatar = $('user-avatar') || document.querySelector('.avatar');
+    const nameEl = $('user-name-display') || document.querySelector('.user-name-t');
+    const roleEl = $('user-role-display') || document.querySelector('.user-role-t');
+
+    if (avatar) avatar.textContent = user.initials || user.name.slice(0, 2).toUpperCase();
+    if (nameEl) nameEl.textContent = user.name;
+    if (roleEl) roleEl.textContent = getRoleLabel(user.role || 'viewer');
+  },
+
+  logout(){
+    localStorage.removeItem('token');
+    localStorage.removeItem('currentUser');
+    location.reload();
   },
 
   openPage(id){
@@ -2163,6 +2206,12 @@ window.App = {
       }
 
       localStorage.setItem('token', result.token);
+      localStorage.setItem('currentUser', JSON.stringify({
+        id: result.user.id,
+        name: result.user.username,
+        email: result.user.email,
+        role: result.user.role || 'viewer'
+      }));
       Modal.close();
       await loadBackendData();
       this.openPage('dashboard');
@@ -2249,6 +2298,12 @@ window.App = {
       });
 
       localStorage.setItem('token', result.token);
+      localStorage.setItem('currentUser', JSON.stringify({
+        id: result.user.id,
+        name: result.user.username,
+        email: result.user.email,
+        role: result.user.role || 'viewer'
+      }));
       Modal.close();
       alert(result.message);
       await loadBackendData();
@@ -2914,6 +2969,7 @@ window.App = {
         }) : x);
         addAudit('Updated user '+rec.name,'update');
       } else {
+        const payload = { name: rec.name, email: rec.email, role: rec.role, status: rec.status };
         user = await fetchBackend('/admin/users', { method:'POST', body: JSON.stringify(payload) });
         const nextUser = {
           id: user.id,

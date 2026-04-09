@@ -169,7 +169,7 @@ const PROJECTS = [
   },
 ];
 
-async function seed() {
+async function seedProjects() {
   console.log('Seeding projects...');
 
   // Remove tasks referencing old projects first (cascade not guaranteed in all SQLite modes)
@@ -199,12 +199,17 @@ async function seed() {
     console.log(`  Inserted: ${p.name} — ${p.full_name}`);
   }
 
-  // Verify
   const result = await pool.query('SELECT id, name, full_name, status, budget FROM projects ORDER BY id');
   console.log('\nProjects now in DB:');
   result.rows.forEach(r => console.log(`  [${r.id}] ${r.name} | ${r.full_name} | ${r.status} | $${r.budget}`));
   console.log('\nDone.');
-  process.exit(0);
 }
 
-seed().catch(e => { console.error('Seed failed:', e); process.exit(1); });
+if (require.main === module) {
+  seedProjects().then(() => process.exit(0)).catch(e => { console.error('Seed failed:', e); process.exit(1); });
+}
+
+module.exports = {
+  PROJECTS,
+  seedProjects,
+};

@@ -4,6 +4,7 @@ const path = require('path');
 require('./config/loadEnv');
 const pool = require('./config/database');
 const { ensureBootstrapAdmin } = require('./bootstrapAdmin');
+const { ensureProjectCatalogue, ensureProgrammeData } = require('./bootstrapCatalogue');
 
 const app = express();
 
@@ -381,6 +382,13 @@ async function startServer() {
       await ensureBootstrapAdmin();
     } catch (userErr) {
       console.warn('[SERVER] Bootstrap admin skipped:', userErr.message);
+    }
+
+    try {
+      await ensureProjectCatalogue();
+      await ensureProgrammeData();
+    } catch (catalogueErr) {
+      console.warn('[SERVER] Project/programme catalogue repair skipped:', catalogueErr.message);
     }
 
     // Auto-seed PSAC and KIIWP farmer data if not yet present

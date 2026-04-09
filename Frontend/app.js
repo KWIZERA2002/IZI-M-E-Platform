@@ -204,6 +204,8 @@ const DB = {
     {id:3,project:"PSAC",location:"Kigali, Gasabo",type:"Focus Group Discussion",plannedDate:"2024-10-01",actualDate:"",team:["Solange Nyiraneza","Alice Uwimana"],outputs:"Planned: 20 SME owner feedback session",findings:"",status:"planned"},
     {id:4,project:"TREPA",location:"Gatsibo, Kiziguro",type:"Farmer Field School",plannedDate:"2024-10-12",actualDate:"",team:["Paul Ndayisaba"],outputs:"Planned: Season B field school launch",findings:"",status:"planned"}
   ],
+  trainingActivities: [],
+  beneficiaryActivitySummary: [],
   field_activities: [],
   tasks: [
     {id:1,title:"Submit TREPA Q3 donor report to USAID",project:"TREPA",assignee:"Alice Uwimana",dueDate:"2024-10-15",priority:"high",status:"pending",linked:"Donor Report"},
@@ -450,6 +452,9 @@ let importPreviewState = {
   type: 'beneficiaries',
   fileName: '',
   projectContext: '',
+  interventionType: '',
+  interventionName: '',
+  interventionDate: '',
   duplicatePolicy: 'update_same_project',
   rawRows: 0,
   validRows: 0,
@@ -459,6 +464,10 @@ let importPreviewState = {
   sample: [],
   headers: [],
   warnings: []
+};
+
+let trainingImportState = {
+  activityMode: 'select',
 };
 
 const getAuthHeaders = () => {
@@ -704,6 +713,49 @@ function getProjectLeadAgency(projectName) {
   return firstDonor;
 }
 
+function classifyInterventionBucket(entry) {
+  const text = `${entry?.intervention_type || ''} ${entry?.intervention_name || ''}`.toLowerCase();
+  if (text.includes('faab') || text.includes('farming as business')) return 'FaaB';
+  if (text.includes('financial literacy')) return 'Financial Literacy';
+  if (text.includes('governance') || text.includes('leadership')) return 'Governance & Leadership';
+  return '';
+}
+
+function buildBeneficiaryActivitySummary() {
+  const rows = Array.isArray(DB.beneficiaryActivitySummary) ? DB.beneficiaryActivitySummary : [];
+  const projectMap = new Map();
+
+  const ensureProject = (projectName) => {
+    const key = String(projectName || 'Unassigned').trim() || 'Unassigned';
+    if (!projectMap.has(key)) {
+      projectMap.set(key, {
+        project: key,
+        FaaB: 0,
+        'Financial Literacy': 0,
+        'Governance & Leadership': 0,
+        'Loan Access': 0,
+        'Market Access': 0,
+        total: 0,
+      });
+    }
+    return projectMap.get(key);
+  };
+
+  rows.forEach((row) => {
+    const record = ensureProject(row.project);
+    const total = Number(row.total || 0);
+    const loan = Number(row.accessed_loan || 0);
+    const market = Number(row.accessed_market || 0);
+    const bucket = classifyInterventionBucket(row);
+    record.total += total;
+    record['Loan Access'] += loan;
+    record['Market Access'] += market;
+    if (bucket) record[bucket] += total;
+  });
+
+  return [...projectMap.values()].sort((a, b) => a.project.localeCompare(b.project));
+}
+
 function syncDonorReportsWithProjects() {
   if (!Array.isArray(DB.donorReports) || !Array.isArray(DB.projects)) return;
   DB.donorReports = DB.donorReports.map((report) => {
@@ -788,6 +840,8 @@ async function loadBackendData() {
     fetchBackend('/kobo-sync/forms'),
     fetchBackend('/admin/users'),
     fetchBackend('/admin/automation-rules'),
+    fetchBackend('/farmers/training-activities'),
+    fetchBackend('/farmers/activity-summary'),
   ]);
 
   if (results[3].status === 'fulfilled' && Array.isArray(results[3].value)) {
@@ -904,6 +958,14 @@ async function loadBackendData() {
     }
   } else {
     console.warn('Load automation rules failed, using local defaults:', results[4].reason || results[4].value);
+  }
+
+  if (results[5].status === 'fulfilled' && Array.isArray(results[5].value)) {
+    DB.trainingActivities = results[5].value;
+  }
+
+  if (results[6].status === 'fulfilled' && Array.isArray(results[6].value)) {
+    DB.beneficiaryActivitySummary = results[6].value;
   }
 
   const authFailed = results.some(r => r.status === 'rejected' && /401/.test(String(r.reason)));
@@ -1405,6 +1467,7 @@ let _benPage=1;
 const _benPerPage=7;
 function renderBeneficiaries(search='',filterProj='All',filterSex='All',filterInterventionType='All',filterInterventionName='All',filterLoan='All',filterMarket='All'){
   const beneficiaries = DB.farmers.length ? DB.farmers : DB.beneficiaries;
+  const summaryRows = buildBeneficiaryActivitySummary();
   const resolveProject = (b) => String(b.project || '').trim() || 'Unassigned';
   const resolveInterventionType = (b) => String(b.intervention_type || '').trim() || 'Unclassified';
   const resolveInterventionName = (b) => String(b.intervention_name || '').trim() || 'Unspecified';
@@ -1438,13 +1501,33 @@ function renderBeneficiaries(search='',filterProj='All',filterSex='All',filterIn
 <div class="section-head">
   <div><div class="section-title">Farmer / Beneficiary Data</div><div class="section-sub">${totalCount} registered beneficiaries</div></div>
   <div style="display:flex;gap:8px">
+    <button class="btn btn-primary btn-sm" onclick="App.openTrainingImportModal()">${ico('plus',13)} New Training/Activity + Import</button>
     <button class="btn btn-ghost btn-sm" onclick="App.importCSV()">${ico('upload',13)} Import CSV/Excel</button>
     <button class="btn btn-ghost btn-sm" onclick="App.exportCSV('beneficiaries')">${ico('download',13)} Export</button>
-    <button class="btn btn-primary btn-sm" onclick="App.openBenForm()">${ico('plus',13)} Add Beneficiary</button>
+    <button class="btn btn-ghost btn-sm" onclick="App.openBenForm()">${ico('plus',13)} Add Beneficiary</button>
   </div>
 </div>
 <div class="g4" style="margin-bottom:16px">
   ${[['Total',totalCount,'var(--blue)'],['Female',fC,'var(--pink)'],['Male',totalCount-fC,'var(--teal)'],['Active',beneficiaries.filter(b=>b.status==='active').length,'var(--green)']].map(([l,v,c])=>`<div class="stat"><div class="stat-lbl">${l}</div><div class="stat-val" style="color:${c}">${v}</div></div>`).join('')}
+</div>
+<div class="card" style="margin-bottom:16px">
+  <div class="card-header"><span class="card-title">Activity Summary By Project</span><span style="font-size:12px;color:var(--text3)">Counts from imported activity-tagged beneficiary records</span></div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Project</th><th>FaaB</th><th>Financial Literacy</th><th>Governance & Leadership</th><th>Loan Access</th><th>Market Access</th><th>Total Tagged</th></tr></thead>
+      <tbody>
+        ${summaryRows.length ? summaryRows.map(row => `<tr>
+          <td><span class="badge b-blue">${esc(row.project)}</span></td>
+          <td>${fmt(row.FaaB)}</td>
+          <td>${fmt(row['Financial Literacy'])}</td>
+          <td>${fmt(row['Governance & Leadership'])}</td>
+          <td>${fmt(row['Loan Access'])}</td>
+          <td>${fmt(row['Market Access'])}</td>
+          <td style="font-weight:600">${fmt(row.total)}</td>
+        </tr>`).join('') : '<tr><td colspan="7" class="empty">No activity-tagged beneficiary records yet. Use the New Training/Activity + Import flow.</td></tr>'}
+      </tbody>
+    </table>
+  </div>
 </div>
 <div class="filter-row">
   <div class="search-wrap"><span class="search-ico">${ico('search',14)}</span><input class="form-input" id="ben-search" value="${esc(search)}" placeholder="Search by name, ID, cooperativeâ€¦" style="width:260px;padding-left:33px" oninput="App.filterBen()"></div>
@@ -3518,6 +3601,307 @@ window.App = {
     Modal.open(`${config.name} Table (${data.length} records)`, html, `<button class="btn btn-ghost" onclick="Modal.close()">Close</button>`);
   },
 
+  getTrainingImportProjectValue(){
+    const selected = (($('train-import-project-select') || {}).value || '').trim();
+    if (selected === '__new__') {
+      return (($('train-import-project-custom') || {}).value || '').trim();
+    }
+    return selected;
+  },
+
+  getTrainingActivitiesForProject(projectName){
+    const project = String(projectName || '').trim().toLowerCase();
+    return (DB.trainingActivities || []).filter((item) => String(item.project || '').trim().toLowerCase() === project);
+  },
+
+  syncTrainingImportModal(){
+    const projectSelect = $('train-import-project-select');
+    const customWrap = $('train-import-project-custom-wrap');
+    const mode = (($('train-import-activity-mode') || {}).value || 'select').trim();
+    const existingWrap = $('train-import-existing-activity-wrap');
+    const createWrap = $('train-import-new-activity-wrap');
+    const typeInput = $('train-import-type');
+    const nameInput = $('train-import-name');
+    const existingSelect = $('train-import-existing-activity');
+
+    if (projectSelect && customWrap) {
+      customWrap.style.display = projectSelect.value === '__new__' ? '' : 'none';
+    }
+    if (existingWrap && createWrap) {
+      existingWrap.style.display = mode === 'select' ? '' : 'none';
+      createWrap.style.display = mode === 'create' ? '' : 'none';
+    }
+
+    const projectName = this.getTrainingImportProjectValue();
+    if (existingSelect) {
+      const activities = this.getTrainingActivitiesForProject(projectName);
+      existingSelect.innerHTML = activities.length
+        ? activities.map((item, index) => `<option value="${index}">${esc(item.activity_type)} - ${esc(item.activity_name)}</option>`).join('')
+        : '<option value="">No existing activities for this project</option>';
+
+      if (mode === 'select' && activities.length) {
+        const selected = activities[Math.max(0, Number(existingSelect.value) || 0)] || activities[0];
+        if (typeInput) typeInput.value = selected.activity_type || '';
+        if (nameInput) nameInput.value = selected.activity_name || '';
+      }
+    }
+  },
+
+  openTrainingImportModal(){
+    importPreviewState = {
+      type: 'beneficiaries', fileName: '', projectContext: '', interventionType: '', interventionName: '', interventionDate: '', duplicatePolicy: 'always_insert', rawRows: 0, validRows: 0, invalidRows: 0, records: [], rows: [], sample: [], headers: [], warnings: []
+    };
+    trainingImportState = { activityMode: 'select' };
+
+    const projectNames = Array.from(new Set([
+      ...DB.projects.map((p) => p.name),
+      ...(DB.trainingActivities || []).map((p) => p.project).filter(Boolean),
+    ])).sort();
+
+    Modal.open('New Training/Activity + Import File', `
+      <div style="display:grid;gap:16px">
+        <div style="background:var(--bg4);border:1px solid var(--border);border-radius:var(--r);padding:12px;font-size:12px;color:var(--text2)">
+          Complete the flow in order: choose or create a project, select or create an activity bucket, upload Excel/CSV, preview rows, then confirm the import into that exact training/activity.
+        </div>
+
+        <div class="fr2">
+          <div class="form-group">
+            <label class="form-label">Project</label>
+            <select class="form-select" id="train-import-project-select" onchange="App.syncTrainingImportModal();App.refreshTrainingImportPreview()">
+              ${projectNames.map((name, index) => `<option value="${esc(name)}" ${index===0?'selected':''}>${esc(name)}</option>`).join('')}
+              <option value="__new__">Create new project name...</option>
+            </select>
+          </div>
+          <div class="form-group" id="train-import-project-custom-wrap" style="display:none">
+            <label class="form-label">New Project Name</label>
+            <input class="form-input" id="train-import-project-custom" placeholder="Enter project name" oninput="App.syncTrainingImportModal();App.refreshTrainingImportPreview()">
+          </div>
+        </div>
+
+        <div class="fr2">
+          <div class="form-group">
+            <label class="form-label">Training / Activity Mode</label>
+            <select class="form-select" id="train-import-activity-mode" onchange="App.syncTrainingImportModal();App.refreshTrainingImportPreview()">
+              <option value="select">Select existing activity</option>
+              <option value="create">Create new activity</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Intervention Date</label>
+            <input type="date" class="form-input" id="train-import-date" value="${new Date().toISOString().slice(0,10)}" onchange="App.refreshTrainingImportPreview()">
+          </div>
+        </div>
+
+        <div id="train-import-existing-activity-wrap" class="form-group">
+          <label class="form-label">Existing Activity</label>
+          <select class="form-select" id="train-import-existing-activity" onchange="App.syncTrainingImportModal();App.refreshTrainingImportPreview()"></select>
+        </div>
+
+        <div id="train-import-new-activity-wrap" style="display:none">
+          <div class="fr2">
+            <div class="form-group">
+              <label class="form-label">Activity Type</label>
+              <select class="form-select" id="train-import-type" onchange="App.refreshTrainingImportPreview()">
+                <option>FaaB</option>
+                <option>Financial Literacy</option>
+                <option>Governance & Leadership</option>
+                <option>Loan Access</option>
+                <option>Market Access</option>
+                <option>Other</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Activity Name</label>
+              <input class="form-input" id="train-import-name" placeholder="e.g. Farming as Business Cohort 3" oninput="App.refreshTrainingImportPreview()">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Description (optional)</label>
+            <textarea class="form-textarea" id="train-import-description" rows="2" placeholder="Short description of the activity bucket"></textarea>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Duplicate Policy</label>
+          <select class="form-select" id="train-import-duplicate-policy" onchange="App.refreshTrainingImportPreview()">
+            <option value="skip_duplicates">Skip duplicates</option>
+            <option value="update_same_project">Update same-project</option>
+            <option value="always_insert" selected>Always insert</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Upload Excel / CSV</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="file" id="train-import-file" accept=".csv,.xlsx,.xls" style="color:var(--text2);font-size:13px;width:100%;background:var(--bg3);padding:10px;border-radius:var(--r);border:1px solid var(--border2)">
+            <button class="btn btn-ghost btn-sm" onclick="App.downloadImportTemplate('beneficiaries')">${ico('download',13)} Template</button>
+          </div>
+        </div>
+
+        <div id="train-import-preview-summary"></div>
+        <div id="train-import-preview-details"></div>
+      </div>
+    `,
+    `<button class="btn btn-ghost" onclick="Modal.close()">Cancel</button><button class="btn btn-ghost" onclick="App.refreshTrainingImportPreview()">Preview Rows</button><button class="btn btn-primary" onclick="App.commitTrainingImport()">Confirm Import</button>`, true);
+
+    const fileInput = $('train-import-file');
+    if (fileInput) fileInput.addEventListener('change', () => App.refreshTrainingImportPreview());
+    this.syncTrainingImportModal();
+  },
+
+  getTrainingImportContext(){
+    const project = this.getTrainingImportProjectValue();
+    const mode = (($('train-import-activity-mode') || {}).value || 'select').trim();
+    const activities = this.getTrainingActivitiesForProject(project);
+    let interventionType = (($('train-import-type') || {}).value || '').trim();
+    let interventionName = (($('train-import-name') || {}).value || '').trim();
+
+    if (mode === 'select' && activities.length) {
+      const selectedIndex = Math.max(0, Number((($('train-import-existing-activity') || {}).value || 0)) || 0);
+      const selected = activities[selectedIndex] || activities[0];
+      interventionType = selected?.activity_type || interventionType;
+      interventionName = selected?.activity_name || interventionName;
+    }
+
+    return {
+      project,
+      mode,
+      interventionType,
+      interventionName,
+      interventionDate: (($('train-import-date') || {}).value || '').trim(),
+      description: (($('train-import-description') || {}).value || '').trim(),
+      duplicatePolicy: (($('train-import-duplicate-policy') || {}).value || 'always_insert').trim(),
+    };
+  },
+
+  async refreshTrainingImportPreview(){
+    const summaryEl = $('train-import-preview-summary');
+    const detailsEl = $('train-import-preview-details');
+    if (!summaryEl || !detailsEl) return;
+
+    const fileInput = $('train-import-file');
+    const file = fileInput?.files?.[0];
+    const ctx = this.getTrainingImportContext();
+
+    if (!ctx.project) {
+      summaryEl.innerHTML = '<div class="db-empty">Choose or create a project first.</div>';
+      detailsEl.innerHTML = '';
+      return;
+    }
+    if (!ctx.interventionType || !ctx.interventionName) {
+      summaryEl.innerHTML = '<div class="db-empty">Select or create a training/activity bucket first.</div>';
+      detailsEl.innerHTML = '';
+      return;
+    }
+    if (!file) {
+      summaryEl.innerHTML = '<div class="db-empty">Upload an Excel or CSV file to preview the import.</div>';
+      detailsEl.innerHTML = '';
+      return;
+    }
+
+    try {
+      const preview = await this.parseFileViaBackend(file, 'beneficiaries', ctx.project, ctx.interventionType, ctx.interventionName, ctx.interventionDate);
+      importPreviewState = {
+        type: preview.type || 'beneficiaries',
+        fileName: preview.fileName || file.name,
+        projectContext: ctx.project,
+        interventionType: ctx.interventionType,
+        interventionName: ctx.interventionName,
+        interventionDate: ctx.interventionDate,
+        duplicatePolicy: ctx.duplicatePolicy,
+        rawRows: preview.rawRows || 0,
+        validRows: preview.validRows || 0,
+        invalidRows: preview.invalidRows || 0,
+        records: Array.isArray(preview.records) ? preview.records : [],
+        rows: Array.isArray(preview.rows) ? preview.rows : [],
+        sample: Array.isArray(preview.sample) ? preview.sample : [],
+        headers: Array.isArray(preview.headers) ? preview.headers : [],
+        warnings: Array.isArray(preview.warnings) ? preview.warnings : [],
+      };
+
+      summaryEl.innerHTML = `
+        <div style="margin-bottom:10px;padding:10px 12px;background:var(--bg4);border:1px solid var(--border);border-radius:var(--r);font-size:12px;color:var(--text2)">
+          Import target: <strong style="color:var(--text)">${esc(ctx.project)}</strong> / <strong style="color:var(--text)">${esc(ctx.interventionType)}</strong> / <strong style="color:var(--text)">${esc(ctx.interventionName)}</strong>${ctx.interventionDate ? ` on <strong style="color:var(--text)">${esc(ctx.interventionDate)}</strong>` : ''}
+        </div>
+        ${this.renderImportPreviewSummary(importPreviewState)}
+      `;
+      detailsEl.innerHTML = this.renderImportPreviewTable(importPreviewState, 'beneficiaries');
+    } catch (err) {
+      importPreviewState = {
+        ...importPreviewState,
+        type: 'beneficiaries',
+        fileName: file.name,
+        projectContext: ctx.project,
+        interventionType: ctx.interventionType,
+        interventionName: ctx.interventionName,
+        interventionDate: ctx.interventionDate,
+        duplicatePolicy: ctx.duplicatePolicy,
+        records: [], rows: [], sample: [], headers: [], rawRows: 0, validRows: 0, invalidRows: 0,
+        warnings: [err.message || 'Preview failed']
+      };
+      summaryEl.innerHTML = `<div class="db-empty">Unable to preview file: ${esc(err.message || 'Unknown error')}</div>`;
+      detailsEl.innerHTML = '';
+    }
+  },
+
+  async commitTrainingImport(){
+    const file = $('train-import-file')?.files?.[0];
+    if (!file) return alert('Upload a file first');
+
+    const ctx = this.getTrainingImportContext();
+    if (!ctx.project) return alert('Project is required');
+    if (!ctx.interventionType || !ctx.interventionName) return alert('Training/activity type and name are required');
+
+    if (!importPreviewState.records.length || importPreviewState.fileName !== file.name || importPreviewState.projectContext !== ctx.project || importPreviewState.interventionType !== ctx.interventionType || importPreviewState.interventionName !== ctx.interventionName || importPreviewState.interventionDate !== ctx.interventionDate) {
+      await this.refreshTrainingImportPreview();
+    }
+
+    if (!importPreviewState.records.length) {
+      return alert('No valid beneficiary rows are available for import. Preview the file and correct the data first.');
+    }
+
+    try {
+      await fetchBackend('/farmers/training-activities', {
+        method: 'POST',
+        body: JSON.stringify({
+          project: ctx.project,
+          activity_type: ctx.interventionType,
+          activity_name: ctx.interventionName,
+          description: ctx.description,
+          status: 'active',
+        })
+      });
+
+      const result = await fetchBackend('/admin/import', {
+        method: 'POST',
+        body: JSON.stringify({
+          type: 'beneficiaries',
+          projectContext: ctx.project,
+          interventionType: ctx.interventionType,
+          interventionName: ctx.interventionName,
+          interventionDate: ctx.interventionDate,
+          duplicatePolicy: ctx.duplicatePolicy,
+          records: importPreviewState.records,
+        })
+      });
+
+      addAudit(`Imported ${result.inserted + result.updated} beneficiary records into ${ctx.project} / ${ctx.interventionName}`, 'import');
+      Modal.close();
+      await loadBackendData();
+      this.renderPage();
+      alert(`Import complete: ${result.inserted} new, ${result.updated} updated, ${result.skipped || 0} skipped.`);
+      AutomationEngine.run({
+        trigger: 'import_beneficiaries',
+        project: ctx.project,
+        count: (result.inserted || 0) + (result.updated || 0),
+        formName: ctx.interventionName,
+        formType: ctx.interventionType,
+      });
+    } catch (err) {
+      alert('Training/activity import failed: ' + err.message);
+    }
+  },
+
   importCSV(){
     importPreviewState = {
       type: 'beneficiaries', fileName: '', projectContext: '', duplicatePolicy: 'update_same_project', rawRows: 0, validRows: 0, invalidRows: 0, records: [], rows: [], sample: [], headers: [], warnings: []
@@ -3764,6 +4148,8 @@ window.App = {
         if (firstNonEmpty) data.name = firstNonEmpty;
       }
       if (!data.id && data.identifier) data.id = data.identifier;
+      if (data.accessed_loan !== undefined) data.accessed_loan = /^(1|true|yes|y)$/i.test(String(data.accessed_loan));
+      if (data.accessed_market !== undefined) data.accessed_market = /^(1|true|yes|y)$/i.test(String(data.accessed_market));
       if (!data.name) return null;
       return data;
     }
@@ -3790,7 +4176,7 @@ window.App = {
     const map = {
       beneficiaries: {
         required: ['name'],
-        optional: ['sex', 'age', 'cooperative', 'province', 'district', 'sector', 'project', 'phone', 'status', 'location']
+        optional: ['sex', 'age', 'cooperative', 'province', 'district', 'sector', 'project', 'phone', 'status', 'location', 'intervention_type', 'intervention_name', 'intervention_date', 'accessed_loan', 'accessed_market', 'record_source']
       },
       indicators: {
         required: ['name'],
@@ -3875,7 +4261,13 @@ window.App = {
         project: ['project','project_name','project name','projet','program','programme'],
         phone: ['phone','mobile','telephone','phone_number','phone number','tel','tél','téléphone','contact','number'],
         status: ['status','état','etat','statut','active','actif'],
-        location: ['location','site','cell','village','lieu','localisation','address','adresse']
+        location: ['location','site','cell','village','lieu','localisation','address','adresse'],
+        intervention_type: ['intervention_type', 'intervention type', 'training type', 'activity type', 'module', 'training_module'],
+        intervention_name: ['intervention_name', 'intervention name', 'training', 'training name', 'activity', 'activity name', 'session'],
+        intervention_date: ['intervention_date', 'intervention date', 'training date', 'activity date', 'date'],
+        accessed_loan: ['accessed_loan', 'accessed loan', 'loan access', 'loan_access', 'received loan'],
+        accessed_market: ['accessed_market', 'accessed market', 'market access', 'market_access', 'linked to market', 'market linkage'],
+        record_source: ['record_source', 'source', 'data source', 'import source']
       },
       indicators: {
         project: ['project','project_name','project name','projet'],
@@ -3920,10 +4312,13 @@ window.App = {
     return window.parseXlsxFile(file);
   },
 
-  async parseFileViaBackend(file, type, projectContext = ''){
+  async parseFileViaBackend(file, type, projectContext = '', interventionType = '', interventionName = '', interventionDate = ''){
     const formData = new FormData();
     formData.append('type', type);
     if (projectContext) formData.append('projectContext', projectContext);
+    if (interventionType) formData.append('interventionType', interventionType);
+    if (interventionName) formData.append('interventionName', interventionName);
+    if (interventionDate) formData.append('interventionDate', interventionDate);
     formData.append('file', file);
     return fetchBackendFormData('/admin/import/preview', formData, { method: 'POST' });
   },
@@ -3931,10 +4326,10 @@ window.App = {
   downloadImportTemplate(type){
     const templates = {
       beneficiaries: {
-        headers: ['id', 'name', 'sex', 'age', 'cooperative', 'province', 'district', 'sector', 'project', 'phone', 'status'],
+        headers: ['id', 'name', 'sex', 'age', 'cooperative', 'province', 'district', 'sector', 'project', 'phone', 'status', 'intervention_type', 'intervention_name', 'intervention_date', 'accessed_loan', 'accessed_market'],
         sample: [
-          ['F001', 'Marie Uwase', 'F', '35', 'Twubakane Coop', 'Eastern', 'Gatsibo', 'Kiziguro', 'KIIWP', '+250788100002', 'active'],
-          ['F002', 'Jean Baptiste Habimana', 'M', '42', 'Ubuzimu Coop', 'Eastern', 'Kayonza', 'Mukarange', 'TREPA', '+250788100001', 'active']
+          ['F001', 'Marie Uwase', 'F', '35', 'Twubakane Coop', 'Eastern', 'Gatsibo', 'Kiziguro', 'KIIWP', '+250788100002', 'active', 'Training', 'Farming as Business (FaaB)', '2026-04-01', '0', '1'],
+          ['F002', 'Jean Baptiste Habimana', 'M', '42', 'Ubuzimu Coop', 'Eastern', 'Kayonza', 'Mukarange', 'TREPA', '+250788100001', 'active', 'Training', 'Financial Literacy', '2026-04-01', '1', '0']
         ]
       },
       indicators: {

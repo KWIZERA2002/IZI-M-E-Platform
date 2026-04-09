@@ -16,7 +16,12 @@ const upload = multer({
 const entityConfig = {
   farmers: {
     table: 'farmers',
-    columns: ['name', 'location', 'phone', 'cooperative', 'project', 'province', 'district', 'sector', 'status', 'sex', 'age', 'identifier']
+    columns: [
+      'name', 'location', 'phone', 'cooperative', 'project', 'province', 'district', 'sector',
+      'status', 'sex', 'age', 'identifier',
+      'intervention_type', 'intervention_name', 'intervention_date',
+      'accessed_loan', 'accessed_market', 'record_source'
+    ]
   },
   indicators: {
     table: 'indicators',
@@ -129,7 +134,11 @@ function getExpectedColumns(type) {
   const map = {
     beneficiaries: {
       required: ['name'],
-      optional: ['sex', 'age', 'cooperative', 'province', 'district', 'sector', 'project', 'phone', 'status', 'location']
+      optional: [
+        'sex', 'age', 'cooperative', 'province', 'district', 'sector', 'project', 'phone', 'status', 'location',
+        'intervention_type', 'intervention_name', 'intervention_date',
+        'accessed_loan', 'accessed_market', 'record_source'
+      ]
     },
     indicators: {
       required: ['name'],
@@ -196,7 +205,13 @@ function getColumnVariations(baseName, type) {
       project: ['project', 'project_name', 'project name', 'projet', 'program', 'programme'],
       phone: ['phone', 'mobile', 'telephone', 'phone_number', 'phone number', 'tel', 'tél', 'téléphone', 'contact', 'number'],
       status: ['status', 'état', 'etat', 'statut', 'active', 'actif'],
-      location: ['location', 'site', 'cell', 'village', 'lieu', 'localisation', 'address', 'adresse']
+      location: ['location', 'site', 'cell', 'village', 'lieu', 'localisation', 'address', 'adresse'],
+      intervention_type: ['intervention_type', 'intervention type', 'training type', 'activity type', 'module', 'training_module'],
+      intervention_name: ['intervention_name', 'intervention name', 'training', 'training name', 'activity', 'activity name', 'session'],
+      intervention_date: ['intervention_date', 'intervention date', 'training date', 'activity date', 'date'],
+      accessed_loan: ['accessed_loan', 'accessed loan', 'loan access', 'loan_access', 'received loan'],
+      accessed_market: ['accessed_market', 'accessed market', 'market access', 'market_access', 'linked to market', 'market linkage'],
+      record_source: ['record_source', 'source', 'data source', 'import source']
     },
     indicators: {
       project: ['project', 'project_name', 'project name', 'projet'],
@@ -302,6 +317,9 @@ function parseSpreadsheetBuffer(fileName, buffer, requestedType) {
 
 function normalizeImportRecord(type, row, options = {}) {
   const defaultProject = String(options.defaultProject || '').trim();
+  const defaultInterventionType = String(options.defaultInterventionType || '').trim();
+  const defaultInterventionName = String(options.defaultInterventionName || '').trim();
+  const defaultInterventionDate = String(options.defaultInterventionDate || '').trim();
   const data = {};
   const expected = getExpectedColumns(type);
   if (!expected) return null;
@@ -341,6 +359,25 @@ function normalizeImportRecord(type, row, options = {}) {
     if (!data.project && defaultProject) {
       data.project = defaultProject;
     }
+
+    if (!data.intervention_type && defaultInterventionType) {
+      data.intervention_type = defaultInterventionType;
+    }
+    if (!data.intervention_name && defaultInterventionName) {
+      data.intervention_name = defaultInterventionName;
+    }
+    if (!data.intervention_date && defaultInterventionDate) {
+      data.intervention_date = defaultInterventionDate;
+    }
+
+    if (data.accessed_loan !== undefined) {
+      data.accessed_loan = /^(1|true|yes|y)$/i.test(String(data.accessed_loan).trim()) ? 1 : 0;
+    }
+    if (data.accessed_market !== undefined) {
+      data.accessed_market = /^(1|true|yes|y)$/i.test(String(data.accessed_market).trim()) ? 1 : 0;
+    }
+
+    if (!data.record_source) data.record_source = 'import';
     if (!data.name) return null;
     return data;
   }
@@ -371,11 +408,19 @@ function normalizeImportRecord(type, row, options = {}) {
 
 function buildImportPreview(type, fileName, rawRows, headers, options = {}) {
   const defaultProject = String(options.defaultProject || '').trim();
+  const defaultInterventionType = String(options.defaultInterventionType || '').trim();
+  const defaultInterventionName = String(options.defaultInterventionName || '').trim();
+  const defaultInterventionDate = String(options.defaultInterventionDate || '').trim();
   const records = [];
   const invalidRows = [];
 
   rawRows.forEach((row, index) => {
-    const normalized = normalizeImportRecord(type, row, { defaultProject });
+    const normalized = normalizeImportRecord(type, row, {
+      defaultProject,
+      defaultInterventionType,
+      defaultInterventionName,
+      defaultInterventionDate,
+    });
     if (normalized) {
       records.push(normalized);
     } else {
@@ -874,6 +919,9 @@ router.delete('/entity/:type/:id', auth, async (req, res) => {
 router.post('/import/preview', auth, upload.single('file'), async (req, res) => {
   const type = normalizeImportType(req.body?.type);
   const defaultProject = String(req.body?.projectContext || '').trim();
+  const defaultInterventionType = String(req.body?.interventionType || '').trim();
+  const defaultInterventionName = String(req.body?.interventionName || '').trim();
+  const defaultInterventionDate = String(req.body?.interventionDate || '').trim();
   const config = resolveEntity(type);
 
   let fileName;
@@ -897,7 +945,12 @@ router.post('/import/preview', auth, upload.single('file'), async (req, res) => 
     if (!resolvedConfig) {
       return res.status(400).json({ error: 'Invalid import type' });
     }
-    res.json(buildImportPreview(resolvedType, fileName, parsed.rows, parsed.headers, { defaultProject }));
+    res.json(buildImportPreview(resolvedType, fileName, parsed.rows, parsed.headers, {
+      defaultProject,
+      defaultInterventionType,
+      defaultInterventionName,
+      defaultInterventionDate,
+    }));
   } catch (err) {
     console.error('[Import Preview] Failed to parse file:', err.message || err);
     res.status(400).json({ error: `Unable to parse file: ${err.message}` });
@@ -908,6 +961,9 @@ router.post('/import/preview', auth, upload.single('file'), async (req, res) => 
 router.post('/import', auth, upload.single('file'), async (req, res) => {
   let type = normalizeImportType(req.body?.type);
   const defaultProject = String(req.body?.projectContext || '').trim();
+  const defaultInterventionType = String(req.body?.interventionType || '').trim();
+  const defaultInterventionName = String(req.body?.interventionName || '').trim();
+  const defaultInterventionDate = String(req.body?.interventionDate || '').trim();
   const duplicatePolicy = normalizeDuplicatePolicy(req.body?.duplicatePolicy);
   const config = resolveEntity(type);
 
@@ -923,7 +979,12 @@ router.post('/import', auth, upload.single('file'), async (req, res) => {
   if (!records && req.file) {
     const parsed = parseSpreadsheetBuffer(req.file.originalname, req.file.buffer, type);
     type = parsed.resolvedType || type || 'beneficiaries';
-    records = buildImportPreview(type, req.file.originalname, parsed.rows, parsed.headers, { defaultProject }).records;
+    records = buildImportPreview(type, req.file.originalname, parsed.rows, parsed.headers, {
+      defaultProject,
+      defaultInterventionType,
+      defaultInterventionName,
+      defaultInterventionDate,
+    }).records;
   }
 
   const resolvedConfig = resolveEntity(type);
@@ -942,8 +1003,6 @@ router.post('/import', auth, upload.single('file'), async (req, res) => {
   const norm = (v) => String(v || '').trim().toLowerCase();
 
   try {
-    await pool.query('BEGIN');
-
     // For beneficiaries, avoid cross-project data overwrites by matching identifier+project first.
     const farmerIndex = new Map();
     if (resolvedConfig.table === 'farmers') {
@@ -961,6 +1020,14 @@ router.post('/import', auth, upload.single('file'), async (req, res) => {
     for (const item of records) {
       if (resolvedConfig.table === 'farmers' && defaultProject && !item.project) {
         item.project = defaultProject;
+      }
+      if (resolvedConfig.table === 'farmers') {
+        if (defaultInterventionType && !item.intervention_type) item.intervention_type = defaultInterventionType;
+        if (defaultInterventionName && !item.intervention_name) item.intervention_name = defaultInterventionName;
+        if (defaultInterventionDate && !item.intervention_date) item.intervention_date = defaultInterventionDate;
+        if (item.accessed_loan !== undefined) item.accessed_loan = /^(1|true|yes|y)$/i.test(String(item.accessed_loan)) ? 1 : 0;
+        if (item.accessed_market !== undefined) item.accessed_market = /^(1|true|yes|y)$/i.test(String(item.accessed_market)) ? 1 : 0;
+        if (!item.record_source) item.record_source = 'import';
       }
       const sanitized = {};
       resolvedConfig.columns.forEach(col => {
@@ -1021,25 +1088,23 @@ router.post('/import', auth, upload.single('file'), async (req, res) => {
         if (!Object.keys(sanitized).length) continue;
         const cols = Object.keys(sanitized);
         const params = cols.map((_, idx) => `$${idx + 1}`).join(', ');
-        const sql = `INSERT INTO ${resolvedConfig.table} (${cols.join(',')}) VALUES (${params})`;
+        const sql = `INSERT INTO ${resolvedConfig.table} (${cols.join(',')}) VALUES (${params}) RETURNING id`;
         const insertResult = await pool.query(sql, Object.values(sanitized));
         if (resolvedConfig.table === 'farmers') {
           const keyIdentifier = norm(sanitized.identifier || item.identifier || item.id);
           const keyProject = norm(sanitized.project || item.project || defaultProject);
-          if (keyIdentifier && insertResult?.lastID) {
-            if (keyProject) farmerIndex.set(`${keyIdentifier}::${keyProject}`, insertResult.lastID);
-            if (!farmerIndex.has(`${keyIdentifier}::`)) farmerIndex.set(`${keyIdentifier}::`, insertResult.lastID);
+          const insertedId = insertResult.rows?.[0]?.id || insertResult.lastID;
+          if (keyIdentifier && insertedId) {
+            if (keyProject) farmerIndex.set(`${keyIdentifier}::${keyProject}`, insertedId);
+            if (!farmerIndex.has(`${keyIdentifier}::`)) farmerIndex.set(`${keyIdentifier}::`, insertedId);
           }
         }
         inserted++;
       }
     }
 
-    await pool.query('COMMIT');
-
     res.json({ inserted, updated, skipped, duplicatePolicy });
   } catch (err) {
-    try { await pool.query('ROLLBACK'); } catch (_) {}
     res.status(500).json({ error: err.message });
   }
 });

@@ -41,7 +41,24 @@ CREATE TABLE IF NOT EXISTS farmers (
   sex TEXT,
   age INTEGER,
   identifier TEXT,
+  intervention_type TEXT,
+  intervention_name TEXT,
+  intervention_date DATE,
+  accessed_loan INTEGER DEFAULT 0,
+  accessed_market INTEGER DEFAULT 0,
+  record_source TEXT DEFAULT 'manual',
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS training_activities (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project TEXT NOT NULL,
+  activity_type TEXT NOT NULL,
+  activity_name TEXT NOT NULL,
+  description TEXT,
+  status TEXT DEFAULT 'active',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(project, activity_type, activity_name)
 );
 
 CREATE TABLE IF NOT EXISTS indicators (
@@ -211,6 +228,12 @@ function createSqliteClient(filePath) {
         if (!cols.includes('district')) db.run("ALTER TABLE farmers ADD COLUMN district TEXT");
         if (!cols.includes('sector')) db.run("ALTER TABLE farmers ADD COLUMN sector TEXT");
         if (!cols.includes('status')) db.run("ALTER TABLE farmers ADD COLUMN status TEXT DEFAULT 'active'");
+        if (!cols.includes('intervention_type')) db.run("ALTER TABLE farmers ADD COLUMN intervention_type TEXT");
+        if (!cols.includes('intervention_name')) db.run("ALTER TABLE farmers ADD COLUMN intervention_name TEXT");
+        if (!cols.includes('intervention_date')) db.run("ALTER TABLE farmers ADD COLUMN intervention_date DATE");
+        if (!cols.includes('accessed_loan')) db.run("ALTER TABLE farmers ADD COLUMN accessed_loan INTEGER DEFAULT 0");
+        if (!cols.includes('accessed_market')) db.run("ALTER TABLE farmers ADD COLUMN accessed_market INTEGER DEFAULT 0");
+        if (!cols.includes('record_source')) db.run("ALTER TABLE farmers ADD COLUMN record_source TEXT DEFAULT 'manual'");
       });
     });
   });
@@ -278,6 +301,26 @@ function createPostgresPool(connectionString) {
           throw stepError;
         }
       }
+
+      // Backward-compatible migrations for already-existing Postgres deployments.
+      await pool.query("ALTER TABLE farmers ADD COLUMN IF NOT EXISTS intervention_type VARCHAR(120)");
+      await pool.query("ALTER TABLE farmers ADD COLUMN IF NOT EXISTS intervention_name VARCHAR(255)");
+      await pool.query("ALTER TABLE farmers ADD COLUMN IF NOT EXISTS intervention_date DATE");
+      await pool.query("ALTER TABLE farmers ADD COLUMN IF NOT EXISTS accessed_loan BOOLEAN DEFAULT FALSE");
+      await pool.query("ALTER TABLE farmers ADD COLUMN IF NOT EXISTS accessed_market BOOLEAN DEFAULT FALSE");
+      await pool.query("ALTER TABLE farmers ADD COLUMN IF NOT EXISTS record_source VARCHAR(120) DEFAULT 'manual'");
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS training_activities (
+          id SERIAL PRIMARY KEY,
+          project VARCHAR(100) NOT NULL,
+          activity_type VARCHAR(120) NOT NULL,
+          activity_name VARCHAR(255) NOT NULL,
+          description TEXT,
+          status VARCHAR(50) DEFAULT 'active',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(project, activity_type, activity_name)
+        )
+      `);
 
       pool._schemaInitialized = true;
       console.log(`[DB] Postgres schema initialized successfully (${executed} statements)`);

@@ -26,7 +26,24 @@ CREATE TABLE IF NOT EXISTS farmers (
     sex VARCHAR(20),
     age INTEGER,
     identifier VARCHAR(100),
+    intervention_type VARCHAR(120),
+    intervention_name VARCHAR(255),
+    intervention_date DATE,
+    accessed_loan BOOLEAN DEFAULT FALSE,
+    accessed_market BOOLEAN DEFAULT FALSE,
+    record_source VARCHAR(120) DEFAULT 'manual',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS training_activities (
+    id SERIAL PRIMARY KEY,
+    project VARCHAR(100) NOT NULL,
+    activity_type VARCHAR(120) NOT NULL,
+    activity_name VARCHAR(255) NOT NULL,
+    description TEXT,
+    status VARCHAR(50) DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(project, activity_type, activity_name)
 );
 
 CREATE TABLE IF NOT EXISTS indicators (

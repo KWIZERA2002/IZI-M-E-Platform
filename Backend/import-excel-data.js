@@ -196,8 +196,8 @@ async function importFarmers(records) {
   let inserted = 0;
   for (const r of records) {
     await pool.query(
-      `INSERT INTO farmers (identifier, name, sex, cooperative, province, district, sector, phone, project, location, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      `INSERT INTO farmers (identifier, name, sex, cooperative, province, district, sector, phone, project, location, status, intervention_type, intervention_name, intervention_date, accessed_loan, accessed_market, record_source)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
       [
         r.identifier || null,
         r.name || null,
@@ -210,6 +210,12 @@ async function importFarmers(records) {
         r.project || null,
         r.location || null,
         r.status || 'active',
+        null,
+        null,
+        null,
+        0,
+        0,
+        'excel_real',
       ]
     );
     inserted += 1;

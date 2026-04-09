@@ -583,6 +583,12 @@ function normalizeFarmer(farmer) {
     sex: farmer.sex || 'M',
     age: farmer.age || '',
     location: farmer.location || '',
+    intervention_type: farmer.intervention_type || '',
+    intervention_name: farmer.intervention_name || '',
+    intervention_date: farmer.intervention_date || '',
+    accessed_loan: farmer.accessed_loan === true || farmer.accessed_loan === 1 || farmer.accessed_loan === '1',
+    accessed_market: farmer.accessed_market === true || farmer.accessed_market === 1 || farmer.accessed_market === '1',
+    record_source: farmer.record_source || '',
   };
 }
 
@@ -1397,18 +1403,30 @@ function renderProjectDetail(p){
 // â”€â”€ BENEFICIARIES â”€â”€
 let _benPage=1;
 const _benPerPage=7;
-function renderBeneficiaries(search='',filterProj='All',filterSex='All'){
+function renderBeneficiaries(search='',filterProj='All',filterSex='All',filterInterventionType='All',filterInterventionName='All',filterLoan='All',filterMarket='All'){
   const beneficiaries = DB.farmers.length ? DB.farmers : DB.beneficiaries;
   const resolveProject = (b) => String(b.project || '').trim() || 'Unassigned';
+  const resolveInterventionType = (b) => String(b.intervention_type || '').trim() || 'Unclassified';
+  const resolveInterventionName = (b) => String(b.intervention_name || '').trim() || 'Unspecified';
   const projectOptions = Array.from(new Set([
     ...DB.projects.map(p => p.name),
     ...beneficiaries.map(resolveProject).filter(Boolean)
   ])).sort();
+  const interventionTypeOptions = Array.from(new Set(beneficiaries.map(resolveInterventionType))).sort();
+  const interventionNameOptions = Array.from(new Set(beneficiaries.map(resolveInterventionName))).sort();
   const s=(search||'').toLowerCase();
   const filtered=beneficiaries.filter(b=>{
     const idValue = (b.identifier || b.id || '').toString().toLowerCase();
-    const ms=(b.name||'').toLowerCase().includes(s)||idValue.includes(s)||(b.cooperative||'').toLowerCase().includes(s)||(b.location||'').toLowerCase().includes(s);
-    return ms&&(filterProj==='All'||resolveProject(b)===filterProj)&&(filterSex==='All'||b.sex===filterSex);
+    const ms=(b.name||'').toLowerCase().includes(s)||idValue.includes(s)||(b.cooperative||'').toLowerCase().includes(s)||(b.location||'').toLowerCase().includes(s)||resolveInterventionName(b).toLowerCase().includes(s)||resolveInterventionType(b).toLowerCase().includes(s);
+    const loanOk = filterLoan === 'All' || (filterLoan === 'Yes' ? !!b.accessed_loan : !b.accessed_loan);
+    const marketOk = filterMarket === 'All' || (filterMarket === 'Yes' ? !!b.accessed_market : !b.accessed_market);
+    return ms
+      && (filterProj==='All'||resolveProject(b)===filterProj)
+      && (filterSex==='All'||b.sex===filterSex)
+      && (filterInterventionType==='All'||resolveInterventionType(b)===filterInterventionType)
+      && (filterInterventionName==='All'||resolveInterventionName(b)===filterInterventionName)
+      && loanOk
+      && marketOk;
   });
   const pages=Math.ceil(filtered.length/_benPerPage)||1;
   if(_benPage>pages)_benPage=1;
@@ -1432,19 +1450,26 @@ function renderBeneficiaries(search='',filterProj='All',filterSex='All'){
   <div class="search-wrap"><span class="search-ico">${ico('search',14)}</span><input class="form-input" id="ben-search" value="${esc(search)}" placeholder="Search by name, ID, cooperativeâ€¦" style="width:260px;padding-left:33px" oninput="App.filterBen()"></div>
   <select class="form-select" id="ben-proj" style="width:150px" onchange="App.filterBen()"><option>All</option>${projectOptions.map(name=>`<option${filterProj===name?' selected':''}>${name}</option>`).join('')}</select>
   <select class="form-select" id="ben-sex" style="width:100px" onchange="App.filterBen()"><option>All</option><option${filterSex==='F'?' selected':''}>F</option><option${filterSex==='M'?' selected':''}>M</option></select>
+  <select class="form-select" id="ben-int-type" style="width:200px" onchange="App.filterBen()"><option>All</option>${interventionTypeOptions.map(name=>`<option${filterInterventionType===name?' selected':''}>${name}</option>`).join('')}</select>
+  <select class="form-select" id="ben-int-name" style="width:220px" onchange="App.filterBen()"><option>All</option>${interventionNameOptions.map(name=>`<option${filterInterventionName===name?' selected':''}>${name}</option>`).join('')}</select>
+  <select class="form-select" id="ben-loan" style="width:120px" onchange="App.filterBen()"><option${filterLoan==='All'?' selected':''}>All</option><option${filterLoan==='Yes'?' selected':''}>Loan: Yes</option><option${filterLoan==='No'?' selected':''}>Loan: No</option></select>
+  <select class="form-select" id="ben-market" style="width:130px" onchange="App.filterBen()"><option${filterMarket==='All'?' selected':''}>All</option><option${filterMarket==='Yes'?' selected':''}>Market: Yes</option><option${filterMarket==='No'?' selected':''}>Market: No</option></select>
 </div>
 <div class="tbl-wrap" style="margin-bottom:14px"><table>
-  <thead><tr><th>ID</th><th>Name</th><th>Sex</th><th>Age</th><th>Cooperative</th><th>Location</th><th>Project</th><th>Status</th><th>Actions</th></tr></thead>
+  <thead><tr><th>ID</th><th>Name</th><th>Sex</th><th>Cooperative</th><th>Project</th><th>Intervention</th><th>Type</th><th>Loan</th><th>Market</th><th>Status</th><th>Actions</th></tr></thead>
   <tbody>${paged.length?paged.map(b=>`<tr>
     <td><span class="mono" style="color:var(--blue)">${esc(b.id)}</span></td>
     <td style="color:var(--text);font-weight:500">${esc(b.name)}</td>
     <td><span class="badge ${b.sex==='F'?'b-purple':'b-teal'}">${b.sex==='F'?'Female':'Male'}</span></td>
-    <td>${b.age}</td><td>${esc(b.cooperative)}</td>
-    <td style="font-size:12px">${esc(b.district)}, ${esc(b.province)}</td>
+    <td>${esc(b.cooperative)}</td>
     <td><span class="badge b-blue">${esc(resolveProject(b))}${b.projectInferred ? ' (derived)' : ''}</span></td>
+    <td>${esc(resolveInterventionName(b))}</td>
+    <td><span class="badge b-teal">${esc(resolveInterventionType(b))}</span></td>
+    <td>${b.accessed_loan ? '<span class="badge b-green">Yes</span>' : '<span class="badge b-red">No</span>'}</td>
+    <td>${b.accessed_market ? '<span class="badge b-green">Yes</span>' : '<span class="badge b-red">No</span>'}</td>
     <td>${badge(b.status)}</td>
     <td><div style="display:flex;gap:4px"><button class="icon-btn" onclick="App.openBenForm('${b.id}')">${ico('edit',13)}</button><button class="icon-btn" onclick="App.deleteBen('${b.id}')">${ico('trash',13)}</button></div></td>
-  </tr>`).join(''):`<tr><td colspan="9" class="empty">No records match your search</td></tr>`}</tbody>
+  </tr>`).join(''):`<tr><td colspan="11" class="empty">No records match your search</td></tr>`}</tbody>
 </table></div>
 ${pages>1?`<div style="display:flex;justify-content:center;align-items:center;gap:10px">
   <button class="btn btn-ghost btn-sm" onclick="App.benPage(${_benPage-1})" ${_benPage===1?'disabled':''}>Previous</button>
@@ -2180,7 +2205,11 @@ window.App = {
     const s=($('ben-search')||{}).value||'';
     const fp=($('ben-proj')||{}).value||'All';
     const fs=($('ben-sex')||{}).value||'All';
-    $('content').innerHTML=renderBeneficiaries(s,fp,fs);
+    const fit=($('ben-int-type')||{}).value||'All';
+    const fin=($('ben-int-name')||{}).value||'All';
+    const floan=($('ben-loan')||{}).value||'All';
+    const fmarket=($('ben-market')||{}).value||'All';
+    $('content').innerHTML=renderBeneficiaries(s,fp,fs,fit,fin,floan,fmarket);
   },
   filterInd(){
     const s=($('ind-search')||{}).value||'';
@@ -2405,7 +2434,11 @@ window.App = {
     const s=($('ben-search')||{}).value||'';
     const fp=($('ben-proj')||{}).value||'All';
     const fs=($('ben-sex')||{}).value||'All';
-    $('content').innerHTML=renderBeneficiaries(s,fp,fs);
+    const fit=($('ben-int-type')||{}).value||'All';
+    const fin=($('ben-int-name')||{}).value||'All';
+    const floan=($('ben-loan')||{}).value||'All';
+    const fmarket=($('ben-market')||{}).value||'All';
+    $('content').innerHTML=renderBeneficiaries(s,fp,fs,fit,fin,floan,fmarket);
   },
 
   // â”€â”€ PROJECT ACTIONS â”€â”€
@@ -2590,7 +2623,7 @@ window.App = {
 
   // â”€â”€ BENEFICIARY ACTIONS â”€â”€
   openBenForm(id){
-    const b=id?DB.beneficiaries.find(x=>x.identifier===id||x.id===id):{id:'F'+String(newId()).slice(-4),sex:'F',age:'',cooperative:'',province:'Eastern',district:'',sector:'',cell:'',village:'',phone:'',status:'active',project:DB.projects[0]?.name||''};
+    const b=id?DB.beneficiaries.find(x=>x.identifier===id||x.id===id):{id:'F'+String(newId()).slice(-4),sex:'F',age:'',cooperative:'',province:'Eastern',district:'',sector:'',cell:'',village:'',phone:'',status:'active',project:DB.projects[0]?.name||'',intervention_type:'Training',intervention_name:'',intervention_date:'',accessed_loan:false,accessed_market:false};
     const body=`
       <div class="fr2"><div class="form-group"><label class="form-label">Farmer ID</label><input class="form-input" id="bf-id" value="${esc(b.id||'')}"></div>
       <div class="form-group"><label class="form-label">Full Name</label><input class="form-input" id="bf-name" value="${esc(b.name||'')}"></div></div>
@@ -2602,12 +2635,35 @@ window.App = {
       <div class="fr3"><div class="form-group"><label class="form-label">Province</label><input class="form-input" id="bf-prov" value="${esc(b.province||'')}"></div>
       <div class="form-group"><label class="form-label">District</label><input class="form-input" id="bf-dist" value="${esc(b.district||'')}"></div>
       <div class="form-group"><label class="form-label">Sector</label><input class="form-input" id="bf-sect" value="${esc(b.sector||'')}"></div></div>
-      <div class="form-group"><label class="form-label">Project</label><select class="form-select" id="bf-proj">${DB.projects.map(p=>`<option${b.project===p.name?' selected':''}>${p.name}</option>`).join('')}</select></div>`;
+      <div class="form-group"><label class="form-label">Project</label><select class="form-select" id="bf-proj">${DB.projects.map(p=>`<option${b.project===p.name?' selected':''}>${p.name}</option>`).join('')}</select></div>
+      <div class="fr2"><div class="form-group"><label class="form-label">Intervention Type</label><input class="form-input" id="bf-int-type" value="${esc(b.intervention_type||'') || 'Training'}" placeholder="e.g. Training, Financial Service"></div>
+      <div class="form-group"><label class="form-label">Intervention Name</label><input class="form-input" id="bf-int-name" value="${esc(b.intervention_name||'')}" placeholder="e.g. Farming as Business (FaaB)"></div></div>
+      <div class="fr3"><div class="form-group"><label class="form-label">Intervention Date</label><input type="date" class="form-input" id="bf-int-date" value="${esc(b.intervention_date||'')}"></div>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:22px"><input type="checkbox" id="bf-loan" ${b.accessed_loan?'checked':''}> Accessed Loan</label>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:22px"><input type="checkbox" id="bf-market" ${b.accessed_market?'checked':''}> Accessed Market</label></div>`;
     Modal.open(id?'Edit Beneficiary':'Add Beneficiary',body,
       `<button class="btn btn-ghost" onclick="Modal.close()">Cancel</button><button class="btn btn-primary" onclick="App.saveBen('${id||''}')">Save</button>`,true);
   },
   saveBen(id){
-    const rec={id:$('bf-id').value.trim(),name:$('bf-name').value.trim(),sex:$('bf-sex').value,age:+$('bf-age').value,cooperative:$('bf-coop').value.trim(),phone:$('bf-phone').value.trim(),province:$('bf-prov').value.trim(),district:$('bf-dist').value.trim(),sector:$('bf-sect').value.trim(),status:$('bf-status').value,project:$('bf-proj').value};
+    const rec={
+      id:$('bf-id').value.trim(),
+      name:$('bf-name').value.trim(),
+      sex:$('bf-sex').value,
+      age:+$('bf-age').value,
+      cooperative:$('bf-coop').value.trim(),
+      phone:$('bf-phone').value.trim(),
+      province:$('bf-prov').value.trim(),
+      district:$('bf-dist').value.trim(),
+      sector:$('bf-sect').value.trim(),
+      status:$('bf-status').value,
+      project:$('bf-proj').value,
+      intervention_type:$('bf-int-type').value.trim(),
+      intervention_name:$('bf-int-name').value.trim(),
+      intervention_date:$('bf-int-date').value,
+      accessed_loan:($('bf-loan')||{}).checked,
+      accessed_market:($('bf-market')||{}).checked,
+      record_source:'manual'
+    };
     if(!rec.name||!rec.id)return alert('Name and ID required');
     if(id){const idx=DB.beneficiaries.findIndex(x=>x.identifier===id||x.id===id);if(idx>=0)DB.beneficiaries[idx]=rec;addAudit('Updated beneficiary '+rec.name,'update');}
     else{if(DB.beneficiaries.find(x=>x.identifier===rec.id||x.id===rec.id))return alert('ID already exists');DB.beneficiaries.push(rec);addAudit('Added beneficiary '+rec.name,'create');}

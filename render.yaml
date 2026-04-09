@@ -3,8 +3,8 @@ services:
     name: izi-me-platform
     runtime: node
     plan: free
-    rootDir: .
-    buildCommand: npm run install-all
+    rootDir: Backend
+    buildCommand: npm install
     startCommand: npm start
     autoDeploy: true
     envVars:

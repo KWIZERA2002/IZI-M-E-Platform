@@ -3,6 +3,7 @@ const cors = require('cors');
 const path = require('path');
 require('./config/loadEnv');
 const pool = require('./config/database');
+const { ensureBootstrapAdmin } = require('./bootstrapAdmin');
 
 const app = express();
 
@@ -374,6 +375,12 @@ async function startServer() {
     console.log('[SERVER] Initializing database...');
     if (pool.initializeSchema) {
       await pool.initializeSchema();
+    }
+
+    try {
+      await ensureBootstrapAdmin();
+    } catch (userErr) {
+      console.warn('[SERVER] Bootstrap admin skipped:', userErr.message);
     }
 
     // Auto-seed PSAC and KIIWP farmer data if not yet present

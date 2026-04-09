@@ -1,5 +1,6 @@
 const nodemailer = require('nodemailer');
 
+const smtpUrl = process.env.SMTP_URL || process.env.MAIL_URL || '';
 const smtpHost = process.env.SMTP_HOST || process.env.SMTP_SERVER || process.env.MAIL_HOST || '';
 const smtpPort = Number(process.env.SMTP_PORT || process.env.MAIL_PORT || 587);
 const smtpUser = process.env.SMTP_USER || process.env.SMTP_USERNAME || process.env.MAIL_USER || process.env.EMAIL_USER || '';
@@ -9,25 +10,35 @@ const appUrl = (process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || proces
 const manualDisable = String(process.env.DISABLE_EMAIL || '').toLowerCase() === 'true';
 
 const hasAuth = !!(smtpUser && smtpPass);
-const emailDisabled = manualDisable || !smtpHost || !emailFrom;
+const emailDisabled = manualDisable || (!smtpUrl && !smtpHost) || !emailFrom;
 
 const transporter = emailDisabled
   ? null
-  : nodemailer.createTransport({
-      host: smtpHost,
-      port: smtpPort,
-      secure: smtpPort === 465,
-      auth: hasAuth ? {
-        user: smtpUser,
-        pass: smtpPass
-      } : undefined
-    });
+  : (smtpUrl
+      ? nodemailer.createTransport(smtpUrl)
+      : nodemailer.createTransport({
+          host: smtpHost,
+          port: smtpPort,
+          secure: smtpPort === 465,
+          auth: hasAuth ? {
+            user: smtpUser,
+            pass: smtpPass
+          } : undefined,
+          tls: {
+            rejectUnauthorized: String(process.env.SMTP_TLS_REJECT_UNAUTHORIZED || '').toLowerCase() !== 'false'
+          }
+        }));
 
 if (!emailDisabled) {
-  console.log(`[Mail] SMTP configured and ready (${smtpHost}:${smtpPort})${hasAuth ? ' with auth' : ' without auth'}`);
+  console.log(`[Mail] SMTP configured and ready (${smtpUrl ? 'url transport' : `${smtpHost}:${smtpPort}`})${hasAuth ? ' with auth' : ' without auth'}`);
+  transporter.verify().then(() => {
+    console.log('[Mail] SMTP connection verified successfully');
+  }).catch((err) => {
+    console.warn('[Mail] SMTP verification failed:', err.message);
+  });
 } else {
   const missing = [];
-  if (!smtpHost) missing.push('SMTP_HOST/SMTP_SERVER');
+  if (!smtpUrl && !smtpHost) missing.push('SMTP_URL or SMTP_HOST/SMTP_SERVER');
   if (!emailFrom) missing.push('EMAIL_FROM');
   console.warn('[Mail] Email sending disabled. Missing config:', missing.join(', ') || 'DISABLE_EMAIL=true');
 }

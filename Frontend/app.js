@@ -3011,7 +3011,7 @@ window.App = {
     }
   },
   showInviteResult(user){
-    const inviteLink = user.invitePath ? `${window.location.origin}${user.invitePath}` : (user.inviteUrl || user.verifyUrl || '');
+    const inviteLink = user.emailInviteUrl || user.inviteUrl || (user.invitePath ? `${window.location.origin}${user.invitePath}` : (user.verifyUrl || ''));
     const invalidationNote = user.previousInviteInvalidated ? ' Previous invitation links are now invalid; share only this latest link.' : '';
     const message = (user.message || 'Invitation processed successfully.') + invalidationNote;
 

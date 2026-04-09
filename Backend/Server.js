@@ -246,7 +246,33 @@ app.get('/accept-invite', (req, res) => {
         <div class="msg" id="msg"></div>
       </div>
       <script>
-        const token = new URLSearchParams(window.location.search).get('token');
+        let token = null;
+
+        function extractToken() {
+          const search = new URLSearchParams(window.location.search);
+          token = search.get('token') || search.get('inviteToken') || search.get('invitation');
+
+          if (!token && window.location.hash) {
+            const hash = window.location.hash.replace(/^#/, '');
+            const hashParams = new URLSearchParams(hash);
+            token = hashParams.get('token') || hashParams.get('inviteToken') || hashParams.get('invitation');
+          }
+
+          // If a full invite URL was pasted as a query value, recover token from it.
+          if (!token) {
+            const nested = search.get('url') || search.get('link');
+            if (nested) {
+              try {
+                const nestedUrl = new URL(nested);
+                token = new URLSearchParams(nestedUrl.search).get('token');
+              } catch (_) {
+                // ignore malformed nested URL
+              }
+            }
+          }
+
+          return token;
+        }
 
         function showMsg(text, type) {
           const el = document.getElementById('msg');
@@ -285,6 +311,7 @@ app.get('/accept-invite', (req, res) => {
         });
 
         async function loadInvite() {
+          extractToken();
           if (!token) {
             document.getElementById('subtitle').textContent = 'No invitation token found. Please use the link from your invitation email.';
             return;

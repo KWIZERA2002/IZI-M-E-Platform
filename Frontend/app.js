@@ -756,12 +756,262 @@ function buildBeneficiaryActivitySummary() {
   return [...projectMap.values()].sort((a, b) => a.project.localeCompare(b.project));
 }
 
+const DONOR_REPORT_TEMPLATE_SECTIONS = [
+  'Executive Summary',
+  'Introduction',
+  'Narrative Progress Report (Objectives, Results, Key Metrics and Outcomes, Challenges and Solutions)',
+  'Key Metrics and Outcomes (Auto Table)',
+  'Impact Stories and Testimonials',
+  'Budget',
+  'Lessons Learnt',
+  'Future Outlook'
+];
+
+function shouldUseAutoReportSection(sectionName) {
+  const value = String(sectionName || '').toLowerCase();
+  return value.includes('auto table') || value.includes('indicator table') || value.includes('key metrics');
+}
+
+function createDefaultDonorReportContent() {
+  const content = {};
+  DONOR_REPORT_TEMPLATE_SECTIONS.forEach((section) => {
+    content[section] = shouldUseAutoReportSection(section) ? 'auto' : '';
+  });
+  return content;
+}
+
+function ensureDonorReportTemplate(report) {
+  if (!report || typeof report !== 'object') return report;
+  const nextContent = { ...(report.content || {}) };
+  let changed = false;
+  DONOR_REPORT_TEMPLATE_SECTIONS.forEach((section) => {
+    if (!(section in nextContent)) {
+      nextContent[section] = shouldUseAutoReportSection(section) ? 'auto' : '';
+      changed = true;
+    }
+  });
+  return changed ? { ...report, content: nextContent } : report;
+}
+
+function getReportIndicators(projectName) {
+  return (DB.indicators || []).filter(i => String(i.project || '') === String(projectName || ''));
+}
+
+function getReportMetrics(projectName) {
+  const indicators = getReportIndicators(projectName);
+  const beneficiaries = (DB.beneficiaries || []).filter(b => String(b.project || '') === String(projectName || ''));
+  const completedActivities = (DB.fieldActivities || []).filter(a => String(a.project || '') === String(projectName || '') && String(a.status || '').toLowerCase() === 'completed');
+  const progressValues = indicators
+    .map(i => pct(i.current, i.target))
+    .filter(v => Number.isFinite(v));
+  const avgProgress = progressValues.length
+    ? Math.round(progressValues.reduce((sum, value) => sum + value, 0) / progressValues.length)
+    : 0;
+
+  return {
+    indicatorCount: indicators.length,
+    beneficiaryCount: beneficiaries.length,
+    completedActivityCount: completedActivities.length,
+    avgProgress,
+  };
+}
+
+function buildDonorAutoDraft(report) {
+  const project = (DB.projects || []).find(p => p.name === report.project) || null;
+  const metrics = getReportMetrics(report.project);
+  const period = report.period || 'the reporting period';
+  const projectTitle = project?.full_name || report.project;
+
+  return {
+    'Executive Summary':
+`During ${period}, ${projectTitle} maintained strong implementation momentum with an average indicator progress of ${metrics.avgProgress}% across ${metrics.indicatorCount} tracked indicators.
+The programme reached ${metrics.beneficiaryCount} direct beneficiaries and completed ${metrics.completedActivityCount} field activities.
+Overall delivery remains on track, with implementation risks monitored and managed through adaptive planning.`,
+    'Introduction':
+`${projectTitle} is implemented to advance measurable development outcomes aligned with donor priorities and national strategies.
+This report summarizes implementation progress, outcomes, financial performance, and operational learning for ${period}.`,
+    'Narrative Progress Report (Objectives, Results, Key Metrics and Outcomes, Challenges and Solutions)':
+`Objectives:
+- Deliver planned project outputs and strengthen service delivery quality.
+- Improve beneficiary-level outcomes through targeted interventions.
+
+Results:
+- Core activities were executed according to workplan milestones.
+- Implementation teams sustained collaboration with local stakeholders.
+
+Key Metrics and Outcomes:
+- ${metrics.indicatorCount} indicators are being tracked, with average progress at ${metrics.avgProgress}%.
+- ${metrics.beneficiaryCount} beneficiaries were reached in this period.
+
+Challenges and Solutions:
+- Challenge: Variability in field scheduling due to weather and logistics constraints.
+- Solution: Updated micro-plans, strengthened follow-up, and tighter partner coordination.`,
+    'Impact Stories and Testimonials':
+`Story 1: A beneficiary household reported improved productivity after participating in project-supported activities.
+Story 2: Local stakeholders highlighted stronger coordination and clearer monitoring information for decision-making.
+Testimonial placeholders can be replaced with verified quotations from field staff and beneficiaries.`,
+    'Budget':
+`Budget execution remained aligned with approved plans for ${period}.
+Narrative placeholders:
+- Planned budget:
+- Actual expenditure:
+- Variance and justification:
+- Cost-efficiency notes:`,
+    'Lessons Learnt':
+`- Early stakeholder engagement improves implementation speed and uptake.
+- Routine data quality checks reduce reporting corrections at period close.
+- Joint review sessions improve accountability and cross-team learning.`,
+    'Future Outlook':
+`In the next reporting period, the team will prioritize completion of pending outputs, deepen beneficiary-level follow-up, and strengthen evidence generation for outcome reporting.
+Management focus will remain on delivery quality, risk mitigation, and value-for-money.`
+  };
+}
+
+function toReportFileToken(value) {
+  return String(value || '')
+    .trim()
+    .replace(/\s+/g, '_')
+    .replace(/[^a-zA-Z0-9_\-]/g, '')
+    .slice(0, 80) || 'report';
+}
+
+function buildReportExportRows(report) {
+  const rows = [
+    ['Field', 'Value'],
+    ['Project', report.project || ''],
+    ['Donor', report.donor || ''],
+    ['Period', report.period || ''],
+    ['Version', report.version || ''],
+    ['Status', report.status || ''],
+    ['Last Edited', report.lastEdited || ''],
+    [],
+    ['Section', 'Content']
+  ];
+
+  Object.keys(report.content || {}).forEach((section) => {
+    const value = report.content[section];
+    if (value === 'auto') {
+      rows.push([section, 'See Metrics table in the report editor']);
+      return;
+    }
+    rows.push([section, String(value || '')]);
+  });
+
+  const indicators = getReportIndicators(report.project || '');
+  if (indicators.length) {
+    rows.push([]);
+    rows.push(['Key Metrics and Outcomes']);
+    rows.push(['Indicator', 'Baseline', 'Target', 'Actual', 'Unit', 'Progress %']);
+    indicators.forEach((i) => {
+      rows.push([
+        i.name || '',
+        i.baseline || 0,
+        i.target || 0,
+        i.current || 0,
+        i.unit || '',
+        pct(i.current, i.target)
+      ]);
+    });
+  }
+
+  return rows;
+}
+
+function buildReportPlainText(report) {
+  const lines = [];
+  lines.push(`Project: ${report.project || ''}`);
+  lines.push(`Donor: ${report.donor || ''}`);
+  lines.push(`Period: ${report.period || ''}`);
+  lines.push(`Version: ${report.version || ''}`);
+  lines.push(`Status: ${report.status || ''}`);
+  lines.push('');
+
+  Object.keys(report.content || {}).forEach((section) => {
+    lines.push(section.toUpperCase());
+    const value = report.content[section];
+    if (value === 'auto') {
+      const indicators = getReportIndicators(report.project || '');
+      if (!indicators.length) {
+        lines.push('No indicator metrics available for this project yet.');
+      } else {
+        indicators.forEach((i) => {
+          lines.push(`- ${i.name || ''}: baseline ${i.baseline || 0}, target ${i.target || 0}, actual ${i.current || 0}, progress ${pct(i.current, i.target)}%`);
+        });
+      }
+    } else {
+      lines.push(String(value || '').trim() || '(No content yet)');
+    }
+    lines.push('');
+  });
+
+  return lines.join('\n');
+}
+
+function buildReportHtml(report) {
+  const blocks = Object.keys(report.content || {}).map((section) => {
+    const value = report.content[section];
+    if (value === 'auto') {
+      const indicators = getReportIndicators(report.project || '');
+      const rows = indicators.map(i => `
+        <tr>
+          <td>${esc(i.name || '')}</td>
+          <td>${esc(i.baseline || 0)}</td>
+          <td>${esc(i.target || 0)}</td>
+          <td>${esc(i.current || 0)}</td>
+          <td>${esc(i.unit || '')}</td>
+          <td>${esc(pct(i.current, i.target))}%</td>
+        </tr>
+      `).join('');
+      return `
+        <h2>${esc(section)}</h2>
+        <table>
+          <thead><tr><th>Indicator</th><th>Baseline</th><th>Target</th><th>Actual</th><th>Unit</th><th>Progress</th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="6">No indicator data yet.</td></tr>'}</tbody>
+        </table>
+      `;
+    }
+    return `
+      <h2>${esc(section)}</h2>
+      <p>${esc(value || '').replace(/\n/g, '<br>')}</p>
+    `;
+  }).join('');
+
+  return `
+  <html>
+    <head>
+      <meta charset="utf-8">
+      <title>Donor Report</title>
+      <style>
+        body { font-family: Calibri, Arial, sans-serif; margin: 36px; color: #111; }
+        h1 { font-size: 24px; margin-bottom: 4px; }
+        .meta { color: #444; font-size: 13px; margin-bottom: 20px; }
+        h2 { font-size: 16px; margin: 18px 0 8px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+        p { font-size: 12px; line-height: 1.6; margin: 0 0 8px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+        th, td { border: 1px solid #bbb; padding: 6px; font-size: 11px; text-align: left; }
+      </style>
+    </head>
+    <body>
+      <h1>${esc(report.project)} Donor Report</h1>
+      <div class="meta">
+        <div>Donor: ${esc(report.donor || '')}</div>
+        <div>Period: ${esc(report.period || '')}</div>
+        <div>Version: ${esc(report.version || '')}</div>
+        <div>Status: ${esc(report.status || '')}</div>
+      </div>
+      ${blocks}
+    </body>
+  </html>
+  `;
+}
+
 function syncDonorReportsWithProjects() {
   if (!Array.isArray(DB.donorReports) || !Array.isArray(DB.projects)) return;
   DB.donorReports = DB.donorReports.map((report) => {
     const alignedDonor = getProjectLeadAgency(report.project);
-    if (!alignedDonor) return report;
-    return { ...report, donor: alignedDonor };
+    const normalized = ensureDonorReportTemplate(report);
+    if (!alignedDonor) return normalized;
+    return { ...normalized, donor: alignedDonor };
   });
 }
 
@@ -1782,8 +2032,10 @@ function renderReportEditor(r){
   <span style="font-family:var(--font-h);font-size:18px;font-weight:700;color:var(--text)">${esc(r.project)} â€” ${esc(donorLabel)} ${esc(r.period)}</span>
   <span class="ver-tag">${esc(r.version)}</span>${badge(r.status)}
   <div style="margin-left:auto;display:flex;gap:8px">
-    <button class="btn btn-ghost btn-sm" onclick="App.exportCSV('report')">${ico('download',13)} Export Excel</button>
-    <button class="btn btn-ghost btn-sm" onclick="window.print()">${ico('download',13)} Print/PDF</button>
+    <button class="btn btn-ghost btn-sm" onclick="App.autoDraftReport(${r.id})">${ico('refresh',13)} Auto Draft</button>
+    <button class="btn btn-ghost btn-sm" onclick="App.exportReportExcel(${r.id})">${ico('download',13)} Export Excel</button>
+    <button class="btn btn-ghost btn-sm" onclick="App.exportReportWord(${r.id})">${ico('download',13)} Export Word</button>
+    <button class="btn btn-ghost btn-sm" onclick="App.exportReportPdf(${r.id})">${ico('download',13)} Export PDF</button>
     <button class="btn btn-success btn-sm" onclick="App.markReportSubmitted(${r.id})">${ico('check',13)} Mark Submitted</button>
   </div>
 </div>
@@ -2909,7 +3161,7 @@ window.App = {
       <div class="form-group"><label class="form-label">Donor (Lead Agency)</label><input class="form-input" id="dr-donor" value="${esc(defaultLeadAgency)}" readonly></div></div>
       <div class="fr2"><div class="form-group"><label class="form-label">Reporting Period</label><input class="form-input" id="dr-period" placeholder="e.g. Q3 2024"></div>
       <div class="form-group"><label class="form-label">Version</label><input class="form-input" id="dr-ver" value="v1.0"></div></div>
-      <div class="form-group"><label class="form-label">Report Sections (one per line)</label><textarea class="form-textarea" id="dr-sects" rows="4">Executive Summary\nProgress by Result\nIndicator Table\nFinancial Summary</textarea></div>`;
+      <div class="form-group"><label class="form-label">Report Sections (one per line)</label><textarea class="form-textarea" id="dr-sects" rows="8">${DONOR_REPORT_TEMPLATE_SECTIONS.join('\n')}</textarea></div>`;
     Modal.open('New Donor Report',body,
       `<button class="btn btn-ghost" onclick="Modal.close()">Cancel</button><button class="btn btn-primary" onclick="App.saveDonorReport()">Create Report</button>`);
     this.syncDonorLeadAgencyInput();
@@ -2922,7 +3174,7 @@ window.App = {
   saveDonorReport(){
     const sects=$('dr-sects').value.split('\n').map(s=>s.trim()).filter(Boolean);
     const content={};
-    sects.forEach(s=>{content[s]=s.toLowerCase().includes('indicator')||s.toLowerCase().includes('result')||s.toLowerCase().includes('output')?'auto':'';});
+    sects.forEach(s=>{content[s]=shouldUseAutoReportSection(s)?'auto':'';});
     const projectName = $('dr-proj').value;
     const donor = getProjectLeadAgency(projectName);
     const rec={id:newId(),project:projectName,donor,period:$('dr-period').value.trim(),version:$('dr-ver').value.trim(),status:'draft',lastEdited:new Date().toISOString().slice(0,10),content};
@@ -2946,7 +3198,103 @@ window.App = {
   editReport(id){_editingReport=id;this.renderPage();},
   closeReport(){_editingReport=null;this.renderPage();},
   markReportSubmitted(id){const r=DB.donorReports.find(x=>x.id===id);if(r){r.status='submitted';r.lastEdited=new Date().toISOString().slice(0,10);addAudit('Marked report submitted: '+r.project+' '+r.period,'update');}this.renderPage();},
-  saveReportSection(id,section,val){const r=DB.donorReports.find(x=>x.id===id);if(r&&r.content)r.content[section]=val;},
+  saveReportSection(id,section,val){const r=DB.donorReports.find(x=>x.id===id);if(r&&r.content){r.content[section]=val;r.lastEdited=new Date().toISOString().slice(0,10);}},
+  autoDraftReport(id){
+    const report = DB.donorReports.find(x=>x.id===id);
+    if(!report) return;
+    const draft = buildDonorAutoDraft(report);
+    Object.keys(draft).forEach((section) => {
+      if (report.content[section] !== 'auto') {
+        const existing = String(report.content[section] || '').trim();
+        if (!existing) report.content[section] = draft[section];
+      }
+    });
+    report.lastEdited = new Date().toISOString().slice(0,10);
+    addAudit('Auto-drafted donor report sections: '+report.project+' '+report.period,'update');
+    this.renderPage();
+    alert('Draft narrative generated. You can now refine each section before export.');
+  },
+  exportReportExcel(id){
+    const report = DB.donorReports.find(x=>x.id===id);
+    if(!report) return alert('Report not found');
+    if(!window.XLSX) return alert('Excel library not loaded. Refresh the page and try again.');
+    const rows = buildReportExportRows(report);
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    XLSX.utils.book_append_sheet(wb, ws, 'Donor Report');
+    const filename = `donor_report_${toReportFileToken(report.project)}_${toReportFileToken(report.period)}.xlsx`;
+    XLSX.writeFile(wb, filename);
+    addAudit('Exported donor report as Excel: '+filename,'update');
+  },
+  exportReportWord(id){
+    const report = DB.donorReports.find(x=>x.id===id);
+    if(!report) return alert('Report not found');
+    const html = buildReportHtml(report);
+    const blob = new Blob([html], { type: 'application/msword' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const filename = `donor_report_${toReportFileToken(report.project)}_${toReportFileToken(report.period)}.doc`;
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+    addAudit('Exported donor report as Word: '+filename,'update');
+  },
+  exportReportPdf(id){
+    const report = DB.donorReports.find(x=>x.id===id);
+    if(!report) return alert('Report not found');
+    if(!window.jspdf || !window.jspdf.jsPDF) return alert('PDF library not loaded. Refresh and try again.');
+
+    const doc = new window.jspdf.jsPDF({ unit: 'pt', format: 'a4' });
+    const marginX = 40;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const maxWidth = pageWidth - marginX * 2;
+    const pageHeight = doc.internal.pageSize.getHeight();
+    let y = 44;
+
+    const pushLine = (text, size = 11, isBold = false) => {
+      doc.setFont('helvetica', isBold ? 'bold' : 'normal');
+      doc.setFontSize(size);
+      const lines = doc.splitTextToSize(String(text || ''), maxWidth);
+      lines.forEach((line) => {
+        if (y > pageHeight - 40) {
+          doc.addPage();
+          y = 44;
+        }
+        doc.text(line, marginX, y);
+        y += size + 4;
+      });
+    };
+
+    pushLine(`${report.project} Donor Report`, 16, true);
+    pushLine(`Donor: ${report.donor || ''}`, 10);
+    pushLine(`Period: ${report.period || ''}`, 10);
+    pushLine(`Version: ${report.version || ''}`, 10);
+    pushLine(`Status: ${report.status || ''}`, 10);
+    y += 6;
+
+    Object.keys(report.content || {}).forEach((section) => {
+      pushLine(section, 12, true);
+      const value = report.content[section];
+      if (value === 'auto') {
+        const indicators = getReportIndicators(report.project || '');
+        if (!indicators.length) {
+          pushLine('No indicator data yet.', 10);
+        } else {
+          indicators.forEach((i) => {
+            pushLine(`- ${i.name || ''}: baseline ${i.baseline || 0}, target ${i.target || 0}, actual ${i.current || 0}, progress ${pct(i.current, i.target)}%`, 10);
+          });
+        }
+      } else {
+        pushLine(String(value || '(No content yet)'), 10);
+      }
+      y += 8;
+    });
+
+    const filename = `donor_report_${toReportFileToken(report.project)}_${toReportFileToken(report.period)}.pdf`;
+    doc.save(filename);
+    addAudit('Exported donor report as PDF: '+filename,'update');
+  },
   deleteDonor(id){Modal.confirm('Delete this report?',()=>{DB.donorReports=DB.donorReports.filter(x=>x.id!==id);App.renderPage();});},
 
   // â”€â”€ USER ACTIONS â”€â”€

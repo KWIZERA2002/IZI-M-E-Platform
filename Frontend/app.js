@@ -772,6 +772,15 @@ function shouldUseAutoReportSection(sectionName) {
   return value.includes('auto table') || value.includes('indicator table') || value.includes('key metrics');
 }
 
+function getDonorReportTitle(report) {
+  if (report?.title && String(report.title).trim()) return String(report.title).trim();
+  const project = String(report?.project || '').trim();
+  const period = String(report?.period || '').trim();
+  if (project && period) return `${project} Donor Report - ${period}`;
+  if (project) return `${project} Donor Report`;
+  return 'Donor Report';
+}
+
 function createDefaultDonorReportContent() {
   const content = {};
   DONOR_REPORT_TEMPLATE_SECTIONS.forEach((section) => {
@@ -784,13 +793,15 @@ function ensureDonorReportTemplate(report) {
   if (!report || typeof report !== 'object') return report;
   const nextContent = { ...(report.content || {}) };
   let changed = false;
+  const nextTitle = getDonorReportTitle(report);
+  if (nextTitle !== report.title) changed = true;
   DONOR_REPORT_TEMPLATE_SECTIONS.forEach((section) => {
     if (!(section in nextContent)) {
       nextContent[section] = shouldUseAutoReportSection(section) ? 'auto' : '';
       changed = true;
     }
   });
-  return changed ? { ...report, content: nextContent } : report;
+  return changed ? { ...report, title: nextTitle, content: nextContent } : report;
 }
 
 function getReportIndicators(projectName) {
@@ -1016,6 +1027,7 @@ function toReportFileToken(value) {
 function buildReportExportRows(report) {
   const rows = [
     ['Field', 'Value'],
+    ['Title', getDonorReportTitle(report)],
     ['Project', report.project || ''],
     ['Donor', report.donor || ''],
     ['Period', report.period || ''],
@@ -1057,6 +1069,7 @@ function buildReportExportRows(report) {
 
 function buildReportPlainText(report) {
   const lines = [];
+  lines.push(`Title: ${getDonorReportTitle(report)}`);
   lines.push(`Project: ${report.project || ''}`);
   lines.push(`Donor: ${report.donor || ''}`);
   lines.push(`Period: ${report.period || ''}`);
@@ -1130,7 +1143,7 @@ function buildReportHtml(report) {
       </style>
     </head>
     <body>
-      <h1>${esc(report.project)} Donor Report</h1>
+      <h1>${esc(getDonorReportTitle(report))}</h1>
       <div class="meta">
         <div>Donor: ${esc(report.donor || '')}</div>
         <div>Period: ${esc(report.period || '')}</div>
@@ -1149,7 +1162,7 @@ function syncDonorReportsWithProjects() {
     const alignedDonor = getProjectLeadAgency(report.project);
     const normalized = ensureDonorReportTemplate(report);
     if (!alignedDonor) return normalized;
-    return { ...normalized, donor: alignedDonor };
+    return ensureDonorReportTemplate({ ...normalized, donor: alignedDonor });
   });
 }
 
@@ -2144,8 +2157,9 @@ function renderDonors(){
   </div>
 </div>
 <div class="tbl-wrap"><table>
-  <thead><tr><th>Project</th><th>Donor</th><th>Period</th><th>Version</th><th>Status</th><th>Last Edited</th><th>Actions</th></tr></thead>
+  <thead><tr><th>Title</th><th>Project</th><th>Donor</th><th>Period</th><th>Version</th><th>Status</th><th>Last Edited</th><th>Actions</th></tr></thead>
   <tbody>${DB.donorReports.map(r=>`<tr>
+    <td style="font-weight:600;color:var(--text)">${esc(getDonorReportTitle(r))}</td>
     <td><span class="badge b-blue">${esc(r.project)}</span></td>
     <td style="color:var(--text);font-weight:500">${esc(r.donor)}</td>
     <td>${esc(r.period)}</td>
@@ -2163,11 +2177,13 @@ function renderDonors(){
 function renderReportEditor(r){
   const donorLabel = getProjectLeadAgency(r.project) || r.donor;
   const inds=DB.indicators.filter(i=>i.project===r.project);
+  const reportTitle = getDonorReportTitle(r);
   return `
 <div class="fade">
 <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px;flex-wrap:wrap">
   <button class="btn btn-ghost btn-sm" onclick="App.closeReport()">${ico('x',12)} Back</button>
-  <span style="font-family:var(--font-h);font-size:18px;font-weight:700;color:var(--text)">${esc(r.project)} â€” ${esc(donorLabel)} ${esc(r.period)}</span>
+  <input class="form-input" value="${esc(reportTitle)}" onchange="App.saveReportTitle(${r.id}, this.value)" style="min-width:280px;max-width:420px;font-family:var(--font-h);font-size:16px;font-weight:700">
+  <span style="font-size:12px;color:var(--text3)">${esc(r.project)} â€¢ ${esc(donorLabel)} â€¢ ${esc(r.period)}</span>
   <span class="ver-tag">${esc(r.version)}</span>${badge(r.status)}
   <div style="margin-left:auto;display:flex;gap:8px">
     <select class="form-select" id="report-tone-${r.id}" style="min-width:170px" title="Auto draft tone">
@@ -3310,9 +3326,11 @@ window.App = {
   openDonorForm(){
     const defaultProjectName = DB.projects[0]?.name || '';
     const defaultLeadAgency = getProjectLeadAgency(defaultProjectName);
+    const defaultTitle = defaultProjectName ? `${defaultProjectName} Donor Report` : 'Donor Report';
     const body=`
       <div class="fr2"><div class="form-group"><label class="form-label">Project</label><select class="form-select" id="dr-proj" onchange="App.syncDonorLeadAgencyInput()">${DB.projects.map(p=>`<option>${p.name}</option>`).join('')}</select></div>
       <div class="form-group"><label class="form-label">Donor (Lead Agency)</label><input class="form-input" id="dr-donor" value="${esc(defaultLeadAgency)}" readonly></div></div>
+      <div class="form-group"><label class="form-label">Report Title</label><input class="form-input" id="dr-title" value="${esc(defaultTitle)}" placeholder="Enter donor report title"></div>
       <div class="fr2"><div class="form-group"><label class="form-label">Reporting Period</label><input class="form-input" id="dr-period" placeholder="e.g. Q3 2024"></div>
       <div class="form-group"><label class="form-label">Version</label><input class="form-input" id="dr-ver" value="v1.0"></div></div>
       <div class="form-group"><label class="form-label">Report Sections (one per line)</label><textarea class="form-textarea" id="dr-sects" rows="8">${DONOR_REPORT_TEMPLATE_SECTIONS.join('\n')}</textarea></div>`;
@@ -3324,6 +3342,10 @@ window.App = {
     const projectName = $('dr-proj')?.value || '';
     const donorInput = $('dr-donor');
     if (donorInput) donorInput.value = getProjectLeadAgency(projectName);
+    const titleInput = $('dr-title');
+    if (titleInput && !String(titleInput.value || '').trim()) {
+      titleInput.value = projectName ? `${projectName} Donor Report` : 'Donor Report';
+    }
   },
   saveDonorReport(){
     const sects=$('dr-sects').value.split('\n').map(s=>s.trim()).filter(Boolean);
@@ -3331,7 +3353,8 @@ window.App = {
     sects.forEach(s=>{content[s]=shouldUseAutoReportSection(s)?'auto':'';});
     const projectName = $('dr-proj').value;
     const donor = getProjectLeadAgency(projectName);
-    const rec={id:newId(),project:projectName,donor,period:$('dr-period').value.trim(),version:$('dr-ver').value.trim(),status:'draft',lastEdited:new Date().toISOString().slice(0,10),content};
+    const enteredTitle = String($('dr-title')?.value || '').trim();
+    const rec={id:newId(),title:enteredTitle || `${projectName} Donor Report`,project:projectName,donor,period:$('dr-period').value.trim(),version:$('dr-ver').value.trim(),status:'draft',lastEdited:new Date().toISOString().slice(0,10),content};
     if(!rec.donor)return alert('Selected project has no Lead Agency. Update the project profile first.');
     if(!rec.period)return alert('Reporting period required');
     DB.donorReports.push(rec);addAudit('Created donor report: '+rec.project+' '+rec.period,'create');
@@ -3352,6 +3375,13 @@ window.App = {
   editReport(id){_editingReport=id;this.renderPage();},
   closeReport(){_editingReport=null;this.renderPage();},
   markReportSubmitted(id){const r=DB.donorReports.find(x=>x.id===id);if(r){r.status='submitted';r.lastEdited=new Date().toISOString().slice(0,10);addAudit('Marked report submitted: '+r.project+' '+r.period,'update');}this.renderPage();},
+  saveReportTitle(id,val){
+    const r=DB.donorReports.find(x=>x.id===id);
+    if(!r) return;
+    const nextTitle = String(val || '').trim() || getDonorReportTitle(r);
+    r.title = nextTitle;
+    r.lastEdited = new Date().toISOString().slice(0,10);
+  },
   saveReportSection(id,section,val){const r=DB.donorReports.find(x=>x.id===id);if(r&&r.content){r.content[section]=val;r.lastEdited=new Date().toISOString().slice(0,10);}},
   formatReportEditorText(editorId, mode){
     const textarea = $(editorId);
@@ -3395,13 +3425,14 @@ window.App = {
   autoDraftReport(id){
     const report = DB.donorReports.find(x=>x.id===id);
     if(!report) return;
+    const normalized = ensureDonorReportTemplate(report);
+    if (normalized !== report) Object.assign(report, normalized);
     const tone = $(`report-tone-${id}`)?.value || 'formal';
     const draft = buildDonorAutoDraft(report, tone);
-    Object.keys(draft).forEach((section) => {
-      if (report.content[section] !== 'auto') {
-        const existing = String(report.content[section] || '').trim();
-        if (!existing) report.content[section] = draft[section];
-      }
+    Object.keys(report.content || {}).forEach((section) => {
+      if (report.content[section] === 'auto') return;
+      report.content[section] = draft[section]
+        || `Draft (${tone} tone): Update this section with project-specific details and verified evidence.`;
     });
     report.lastEdited = new Date().toISOString().slice(0,10);
     addAudit(`Auto-drafted donor report sections (${tone}): ${report.project} ${report.period}`,'update');
@@ -3416,7 +3447,7 @@ window.App = {
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(rows);
     XLSX.utils.book_append_sheet(wb, ws, 'Donor Report');
-    const filename = `donor_report_${toReportFileToken(report.project)}_${toReportFileToken(report.period)}.xlsx`;
+    const filename = `donor_report_${toReportFileToken(getDonorReportTitle(report))}.xlsx`;
     XLSX.writeFile(wb, filename);
     addAudit('Exported donor report as Excel: '+filename,'update');
   },
@@ -3427,7 +3458,7 @@ window.App = {
     const blob = new Blob([html], { type: 'application/msword' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    const filename = `donor_report_${toReportFileToken(report.project)}_${toReportFileToken(report.period)}.doc`;
+    const filename = `donor_report_${toReportFileToken(getDonorReportTitle(report))}.doc`;
     a.href = url;
     a.download = filename;
     a.click();
@@ -3460,7 +3491,7 @@ window.App = {
       });
     };
 
-    pushLine(`${report.project} Donor Report`, 16, true);
+    pushLine(getDonorReportTitle(report), 16, true);
     pushLine(`Donor: ${report.donor || ''}`, 10);
     pushLine(`Period: ${report.period || ''}`, 10);
     pushLine(`Version: ${report.version || ''}`, 10);
@@ -3485,7 +3516,7 @@ window.App = {
       y += 8;
     });
 
-    const filename = `donor_report_${toReportFileToken(report.project)}_${toReportFileToken(report.period)}.pdf`;
+    const filename = `donor_report_${toReportFileToken(getDonorReportTitle(report))}.pdf`;
     doc.save(filename);
     addAudit('Exported donor report as PDF: '+filename,'update');
   },

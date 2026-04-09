@@ -1,11 +1,15 @@
 const nodemailer = require('nodemailer');
 
-const smtpUrl = process.env.SMTP_URL || process.env.MAIL_URL || '';
-const smtpHost = process.env.SMTP_HOST || process.env.SMTP_SERVER || process.env.MAIL_HOST || '';
+const smtpUrl = String(process.env.SMTP_URL || process.env.MAIL_URL || '').trim();
+const smtpHost = String(process.env.SMTP_HOST || process.env.SMTP_SERVER || process.env.MAIL_HOST || '').trim();
 const smtpPort = Number(process.env.SMTP_PORT || process.env.MAIL_PORT || 587);
-const smtpUser = process.env.SMTP_USER || process.env.SMTP_USERNAME || process.env.MAIL_USER || process.env.EMAIL_USER || '';
-const smtpPass = process.env.SMTP_PASS || process.env.SMTP_PASSWORD || process.env.MAIL_PASS || process.env.EMAIL_PASSWORD || '';
-const emailFrom = process.env.EMAIL_FROM || process.env.SMTP_FROM || process.env.MAIL_FROM || smtpUser || '';
+const rawSmtpUser = String(process.env.SMTP_USER || process.env.SMTP_USERNAME || process.env.MAIL_USER || process.env.EMAIL_USER || '').trim();
+const rawSmtpPass = String(process.env.SMTP_PASS || process.env.SMTP_PASSWORD || process.env.MAIL_PASS || process.env.EMAIL_PASSWORD || '').trim();
+const isGmailHost = /(^|\.)gmail\.com$/i.test(smtpHost) || /smtp\.gmail\.com/i.test(smtpUrl);
+const smtpUser = rawSmtpUser;
+// Gmail App Passwords are often copied with spaces; normalize them automatically.
+const smtpPass = isGmailHost ? rawSmtpPass.replace(/\s+/g, '') : rawSmtpPass;
+const emailFrom = String(process.env.EMAIL_FROM || process.env.SMTP_FROM || process.env.MAIL_FROM || smtpUser || '').trim();
 const appUrl = (process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || process.env.FRONTEND_URL || 'http://localhost:5000').replace(/\/$/, '');
 const manualDisable = String(process.env.DISABLE_EMAIL || '').toLowerCase() === 'true';
 
@@ -28,6 +32,23 @@ const transporter = emailDisabled
             rejectUnauthorized: String(process.env.SMTP_TLS_REJECT_UNAUTHORIZED || '').toLowerCase() !== 'false'
           }
         }));
+
+function buildTransportWithoutCustomFromAuth() {
+  if (emailDisabled) return null;
+  if (smtpUrl) return nodemailer.createTransport(smtpUrl);
+  return nodemailer.createTransport({
+    host: smtpHost,
+    port: smtpPort,
+    secure: smtpPort === 465,
+    auth: hasAuth ? {
+      user: smtpUser,
+      pass: smtpPass
+    } : undefined,
+    tls: {
+      rejectUnauthorized: String(process.env.SMTP_TLS_REJECT_UNAUTHORIZED || '').toLowerCase() !== 'false'
+    }
+  });
+}
 
 if (!emailDisabled) {
   console.log(`[Mail] SMTP configured and ready (${smtpUrl ? 'url transport' : `${smtpHost}:${smtpPort}`})${hasAuth ? ' with auth' : ' without auth'}`);
@@ -162,8 +183,35 @@ const sendInviteEmail = async (email, name, inviteUrl) => {
     await transporter.sendMail(mailOptions);
     return { success: true, inviteUrl };
   } catch (error) {
+    const primaryMessage = error && error.message ? error.message : 'Unknown SMTP error';
+    const code = error && error.code ? String(error.code) : '';
+    const response = error && error.response ? String(error.response) : '';
+    const responseCode = error && error.responseCode ? String(error.responseCode) : '';
+
+    // Retry once with a simple sender mailbox if provider rejects display-name "from" value.
+    const shouldRetryWithSimpleFrom = Boolean(
+      smtpUser
+      && emailFrom
+      && emailFrom !== smtpUser
+      && /from|sender|mailbox|envelope|550|553|5\.7\./i.test(`${primaryMessage} ${response}`)
+    );
+
+    if (shouldRetryWithSimpleFrom) {
+      try {
+        const retryTransporter = buildTransportWithoutCustomFromAuth();
+        await retryTransporter.sendMail({ ...mailOptions, from: smtpUser });
+        console.warn('[Mail] Invite email sent after fallback to SMTP_USER as from address');
+        return { success: true, inviteUrl };
+      } catch (retryError) {
+        const retryMessage = retryError && retryError.message ? retryError.message : 'Unknown retry SMTP error';
+        const retryResponse = retryError && retryError.response ? String(retryError.response) : '';
+        console.error('Email send failed (primary + retry):', primaryMessage, retryMessage);
+        throw new Error(`Failed to send invitation email: ${retryMessage}${retryResponse ? ` | ${retryResponse}` : ''}`);
+      }
+    }
+
     console.error('Email send failed:', error);
-    throw new Error('Failed to send invitation email: ' + error.message);
+    throw new Error(`Failed to send invitation email: ${primaryMessage}${code ? ` [${code}]` : ''}${responseCode ? ` [${responseCode}]` : ''}${response ? ` | ${response}` : ''}`);
   }
 };
 

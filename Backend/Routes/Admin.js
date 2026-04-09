@@ -81,6 +81,12 @@ function getPublicBaseUrl(req) {
   return `${req.protocol}://${req.get('host')}`;
 }
 
+function withInviteFailureReason(baseMessage, sendResult) {
+  const reason = String(sendResult?.error || '').trim();
+  if (!reason) return baseMessage;
+  return `${baseMessage} Reason: ${reason}`;
+}
+
 async function generateUniqueUsername(baseValue, excludeUserId = null) {
   const base = String(baseValue || 'user')
     .trim()
@@ -698,7 +704,7 @@ router.post('/users', auth, requirePermission('users:create'), async (req, res) 
         ...userRow,
         message: sendResult.success
           ? (sendResult.skipped ? 'Invitation refreshed. Email sending is disabled; share the invite link manually.' : 'Invitation resent successfully.')
-          : 'Invitation refreshed, but email delivery failed. Please share the invite link manually and check SMTP settings.',
+          : withInviteFailureReason('Invitation refreshed, but email delivery failed. Please share the invite link manually and check SMTP settings.', sendResult),
         inviteResent: true,
         previousInviteInvalidated: !!existingUser.verification_token,
         invitePath,
@@ -727,7 +733,7 @@ router.post('/users', auth, requirePermission('users:create'), async (req, res) 
       ...userRow,
       message: sendResult.success
         ? (sendResult.skipped ? 'User invited. Email sending is disabled; share the invite link manually.' : 'Invitation email sent successfully.')
-        : 'User invited, but email delivery failed. Please share the invite link manually and check SMTP settings.',
+        : withInviteFailureReason('User invited, but email delivery failed. Please share the invite link manually and check SMTP settings.', sendResult),
       inviteResent: false,
       previousInviteInvalidated: false,
       invitePath,
@@ -791,7 +797,7 @@ router.post('/users/:id/resend-invite', auth, requirePermission('users:invite'),
       emailInviteUrl: sendResult.inviteUrl || null,
       message: sendResult.success
         ? (sendResult.skipped ? 'Invitation refreshed. Email sending is disabled; share the invite link manually.' : 'Invitation resent successfully.')
-        : 'Invitation refreshed, but email delivery failed. Please share the invite link manually and check SMTP settings.'
+        : withInviteFailureReason('Invitation refreshed, but email delivery failed. Please share the invite link manually and check SMTP settings.', sendResult)
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

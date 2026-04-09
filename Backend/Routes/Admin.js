@@ -6,7 +6,7 @@ const multer = require('multer');
 const xlsx = require('xlsx');
 const pool = require('../config/database');
 const auth = require('../MIDDLEWARE/Auth');
-const { sendInviteEmail } = require('../Services/EmailService');
+const { sendInviteEmail, testSmtpConnection } = require('../Services/EmailService');
 const { requirePermission } = require('../utils/rbac');
 
 const upload = multer({
@@ -689,7 +689,7 @@ router.post('/users', auth, requirePermission('users:create'), async (req, res) 
       );
       userRow = updated.rows[0];
       try {
-        sendResult = await sendInviteEmail(email, normalizedName, verificationToken);
+        sendResult = await sendInviteEmail(email, normalizedName, fallbackInviteUrl);
       } catch (mailErr) {
         console.warn('[Admin Invite] Failed to resend invitation email:', mailErr.message);
         sendResult = { success: false, skipped: false, error: mailErr.message };
@@ -717,7 +717,7 @@ router.post('/users', auth, requirePermission('users:create'), async (req, res) 
     userRow = result.rows[0];
 
     try {
-      sendResult = await sendInviteEmail(email, normalizedName, verificationToken);
+      sendResult = await sendInviteEmail(email, normalizedName, fallbackInviteUrl);
     } catch (mailErr) {
       console.warn('[Admin Invite] Failed to send invitation email:', mailErr.message);
       sendResult = { success: false, skipped: false, error: mailErr.message };
@@ -771,7 +771,7 @@ router.post('/users/:id/resend-invite', auth, requirePermission('users:invite'),
 
     let sendResult = { success: true, skipped: false };
     try {
-      sendResult = await sendInviteEmail(user.email, user.username, verificationToken);
+      sendResult = await sendInviteEmail(user.email, user.username, fallbackInviteUrl);
     } catch (mailErr) {
       console.warn('[Admin Invite] Failed to resend invitation email:', mailErr.message);
       sendResult = { success: false, skipped: false, error: mailErr.message };
@@ -1166,6 +1166,16 @@ router.post('/import', auth, requirePermission('admin:import'), upload.single('f
     }
 
     res.json({ inserted, updated, skipped, duplicatePolicy });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// SMTP connection test — lets admin verify email config from the platform
+router.get('/test-smtp', auth, requirePermission('admin:settings'), async (req, res) => {
+  try {
+    const result = await testSmtpConnection();
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -1886,7 +1886,10 @@ function renderAdmin(){
 </div>
 
 ${_adminTab==='users'?`
-<div style="display:flex;justify-content:flex-end;margin-bottom:14px"><button class="btn btn-primary btn-sm" onclick="App.openUserForm()">${ico('plus',13)} Add User</button></div>
+<div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:14px">
+  <button class="btn btn-ghost btn-sm" onclick="App.testSmtp()" title="Test SMTP email connection">${ico('mail',13)} Test Email</button>
+  <button class="btn btn-primary btn-sm" onclick="App.openUserForm()">${ico('plus',13)} Add User</button>
+</div>
 <div class="tbl-wrap"><table>
   <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Projects</th><th>Last Login</th><th>Latest Invite Generated At</th><th>Invite Expires At</th><th>Status</th><th>Actions</th></tr></thead>
   <tbody>${DB.users.map(u=>`<tr>
@@ -3060,6 +3063,46 @@ window.App = {
       this.showInviteResult(result);
     } catch (err) {
       alert('Resend invite failed: ' + err.message);
+    }
+  },
+  async testSmtp(){
+    try {
+      const r = await fetchBackend('/admin/test-smtp');
+      let lines = [];
+      if (!r.enabled) {
+        lines.push('EMAIL STATUS: Disabled');
+        if (r.missing && r.missing.length) lines.push('Missing env vars: ' + r.missing.join(', '));
+        if (r.reason) lines.push('Reason: ' + r.reason);
+        if (r.config) {
+          lines.push('');
+          lines.push('Current config:');
+          lines.push('  SMTP_HOST: ' + (r.config.host || '(not set)'));
+          lines.push('  SMTP_PORT: ' + (r.config.port || '(not set)'));
+          lines.push('  SMTP_USER: ' + (r.config.user || '(not set)'));
+          lines.push('  EMAIL_FROM: ' + (r.config.from || '(not set)'));
+        }
+      } else if (r.connected) {
+        lines.push('EMAIL STATUS: Connected ✓');
+        lines.push('Host: ' + (r.config.host || '?'));
+        lines.push('User: ' + (r.config.user || '?'));
+        lines.push('From: ' + (r.config.from || '?'));
+      } else {
+        lines.push('EMAIL STATUS: Enabled but connection FAILED');
+        lines.push('Error: ' + (r.error || 'Unknown error'));
+        lines.push('');
+        lines.push('Config used:');
+        lines.push('  Host: ' + (r.config.host || '?'));
+        lines.push('  Port: ' + (r.config.port || '?'));
+        lines.push('  User: ' + (r.config.user || '?'));
+        lines.push('');
+        lines.push('Fix: Check SMTP_PASS (use Gmail App Password, not account password).');
+      }
+      Modal.open('SMTP Email Status',
+        `<pre style="font-family:monospace;font-size:13px;white-space:pre-wrap;word-break:break-all">${esc(lines.join('\n'))}</pre>`,
+        `<button class="btn btn-ghost" onclick="Modal.close()">Close</button>`,
+        true);
+    } catch (err) {
+      alert('SMTP test failed: ' + err.message);
     }
   },
   async _performDeleteUser(id){

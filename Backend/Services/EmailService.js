@@ -124,8 +124,9 @@ const sendPasswordResetEmail = async (email, username, resetToken) => {
   }
 };
 
-const sendInviteEmail = async (email, name, token) => {
-  const inviteUrl = `${appUrl}/accept-invite?token=${token}`;
+const sendInviteEmail = async (email, name, inviteUrl) => {
+  // inviteUrl is passed in by the caller — Admin.js uses fallbackInviteUrl so it is always
+  // the correct public URL regardless of whether APP_URL is set.
   if (emailDisabled) {
     console.log('Email sending disabled. Invitation URL:', inviteUrl);
     return { success: true, skipped: true, inviteUrl };
@@ -166,9 +167,52 @@ const sendInviteEmail = async (email, name, token) => {
   }
 };
 
+const testSmtpConnection = async () => {
+  if (emailDisabled) {
+    const missing = [];
+    if (!smtpUrl && !smtpHost) missing.push('SMTP_URL or SMTP_HOST');
+    if (!emailFrom) missing.push('EMAIL_FROM');
+    return {
+      enabled: false,
+      reason: manualDisable ? 'Manually disabled via DISABLE_EMAIL=true' : 'Missing required env vars',
+      missing,
+      config: { host: smtpHost || '(not set)', port: smtpPort, user: smtpUser || '(not set)', from: emailFrom || '(not set)' }
+    };
+  }
+  try {
+    await transporter.verify();
+    return {
+      enabled: true,
+      connected: true,
+      config: {
+        transport: smtpUrl ? 'url' : 'host/port',
+        host: smtpUrl ? '(SMTP_URL)' : smtpHost,
+        port: smtpUrl ? null : smtpPort,
+        secure: smtpPort === 465,
+        user: smtpUser || '(none)',
+        from: emailFrom
+      }
+    };
+  } catch (err) {
+    return {
+      enabled: true,
+      connected: false,
+      error: err.message,
+      config: {
+        transport: smtpUrl ? 'url' : 'host/port',
+        host: smtpUrl ? '(SMTP_URL)' : smtpHost,
+        port: smtpUrl ? null : smtpPort,
+        user: smtpUser || '(none)',
+        from: emailFrom
+      }
+    };
+  }
+};
+
 module.exports = {
   sendVerificationEmail,
   sendPasswordResetEmail,
   sendInviteEmail,
+  testSmtpConnection,
   isEmailEnabled: !emailDisabled
 };

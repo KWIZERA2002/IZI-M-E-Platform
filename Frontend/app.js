@@ -781,6 +781,48 @@ function getDonorReportTitle(report) {
   return 'Donor Report';
 }
 
+const DONOR_REPORTS_STORAGE_KEY = 'izi_donor_reports_v1';
+const DONOR_REPORT_RESUME_ID_KEY = 'izi_donor_reports_resume_id';
+
+function persistDonorReports() {
+  try {
+    localStorage.setItem(DONOR_REPORTS_STORAGE_KEY, JSON.stringify(DB.donorReports || []));
+  } catch (error) {
+    console.warn('Failed to persist donor reports:', error.message);
+  }
+}
+
+function restorePersistedDonorReports() {
+  try {
+    const raw = localStorage.getItem(DONOR_REPORTS_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || !parsed.length) return;
+    DB.donorReports = parsed.map(report => ensureDonorReportTemplate(report));
+  } catch (error) {
+    console.warn('Failed to restore donor reports:', error.message);
+  }
+}
+
+function setDonorReportResumeId(reportId) {
+  try {
+    localStorage.setItem(DONOR_REPORT_RESUME_ID_KEY, String(reportId));
+  } catch (error) {
+    console.warn('Failed to store donor report resume id:', error.message);
+  }
+}
+
+function getDonorReportResumeId() {
+  try {
+    const raw = localStorage.getItem(DONOR_REPORT_RESUME_ID_KEY);
+    if (!raw) return null;
+    const id = Number(raw);
+    return Number.isFinite(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
 function createDefaultDonorReportContent() {
   const content = {};
   DONOR_REPORT_TEMPLATE_SECTIONS.forEach((section) => {
@@ -2147,11 +2189,14 @@ let _editingReport=null;
 function renderDonors(){
   syncDonorReportsWithProjects();
   if(_editingReport){const r=DB.donorReports.find(x=>x.id===_editingReport);return r?renderReportEditor(r):renderDonors();}
+  const resumeId = getDonorReportResumeId();
+  const hasResume = DB.donorReports.some(r => r.id === resumeId);
   return `
 <div class="fade">
 <div class="section-head">
   <div><div class="section-title">Donor Reports</div><div class="section-sub">Generate and manage donor-ready reports</div></div>
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    ${hasResume ? `<button class="btn btn-ghost btn-sm" onclick="App.continueLastReportDraft()">${ico('edit',12)} Continue Last Draft</button>` : ''}
     ${DB.currentUser?.role === 'admin' ? `<button class="btn btn-ghost btn-sm" onclick="App.syncAllDonorReportsNow()">${ico('refresh',12)} Update Existing Reports</button>` : ''}
     <button class="btn btn-primary btn-sm" onclick="App.openDonorForm()">${ico('plus',13)} New Report</button>
   </div>
@@ -2182,7 +2227,7 @@ function renderReportEditor(r){
 <div class="fade">
 <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px;flex-wrap:wrap">
   <button class="btn btn-ghost btn-sm" onclick="App.closeReport()">${ico('x',12)} Back</button>
-  <input class="form-input" value="${esc(reportTitle)}" onchange="App.saveReportTitle(${r.id}, this.value)" style="min-width:280px;max-width:420px;font-family:var(--font-h);font-size:16px;font-weight:700">
+  <input class="form-input" value="${esc(reportTitle)}" oninput="App.saveReportTitle(${r.id}, this.value)" style="min-width:280px;max-width:420px;font-family:var(--font-h);font-size:16px;font-weight:700">
   <span style="font-size:12px;color:var(--text3)">${esc(r.project)} â€¢ ${esc(donorLabel)} â€¢ ${esc(r.period)}</span>
   <span class="ver-tag">${esc(r.version)}</span>${badge(r.status)}
   <div style="margin-left:auto;display:flex;gap:8px">
@@ -2219,7 +2264,7 @@ ${Object.keys(r.content).map(section=>{
         <button class="btn btn-ghost btn-xs" type="button" onclick="App.formatReportEditorText('${editorId}','bullets')">• Bullets</button>
       </div>
     </div>
-    <textarea id="${editorId}" class="form-textarea" rows="6" placeholder="Enter ${esc(section)} narrativeâ€¦" onchange="App.saveReportSection(${r.id},'${esc(section)}',this.value)">${esc(r.content[section]||'')}</textarea>
+    <textarea id="${editorId}" class="form-textarea" rows="6" placeholder="Enter ${esc(section)} narrativeâ€¦" oninput="App.saveReportSection(${r.id},'${esc(section)}',this.value)">${esc(r.content[section]||'')}</textarea>
     <div style="font-size:11px;color:var(--text3);margin-top:4px">Tip: Use <strong>**bold text**</strong> and bullet lines that start with <strong>- </strong> for richer export output.</div>`}
 </div>`;
 }).join('')}
@@ -2531,6 +2576,7 @@ window.App = {
 
   async init(){
     buildNav();
+    restorePersistedDonorReports();
     this.updateUserDisplay();
     const params = new URLSearchParams(window.location.search);
     const urlToken = params.get('token');
@@ -3358,6 +3404,8 @@ window.App = {
     if(!rec.donor)return alert('Selected project has no Lead Agency. Update the project profile first.');
     if(!rec.period)return alert('Reporting period required');
     DB.donorReports.push(rec);addAudit('Created donor report: '+rec.project+' '+rec.period,'create');
+    persistDonorReports();
+    setDonorReportResumeId(rec.id);
     Modal.close();this.renderPage();
   },
   syncAllDonorReportsNow(){
@@ -3368,21 +3416,32 @@ window.App = {
       updated += 1;
       return { ...report, donor: alignedDonor };
     });
+    persistDonorReports();
     addAudit('Resynced donor reports with project lead agencies (' + updated + ' updated)','update');
     this.renderPage();
     alert(updated ? `Updated ${updated} donor report${updated === 1 ? '' : 's'} from project Lead Agency values.` : 'All donor reports were already aligned with project Lead Agency values.');
   },
-  editReport(id){_editingReport=id;this.renderPage();},
+  continueLastReportDraft(){
+    const id = getDonorReportResumeId();
+    if (!id) return alert('No previous draft was found.');
+    const exists = DB.donorReports.some(x => x.id === id);
+    if (!exists) return alert('The previous draft could not be found.');
+    _editingReport = id;
+    this.renderPage();
+  },
+  editReport(id){_editingReport=id;setDonorReportResumeId(id);this.renderPage();},
   closeReport(){_editingReport=null;this.renderPage();},
-  markReportSubmitted(id){const r=DB.donorReports.find(x=>x.id===id);if(r){r.status='submitted';r.lastEdited=new Date().toISOString().slice(0,10);addAudit('Marked report submitted: '+r.project+' '+r.period,'update');}this.renderPage();},
+  markReportSubmitted(id){const r=DB.donorReports.find(x=>x.id===id);if(r){r.status='submitted';r.lastEdited=new Date().toISOString().slice(0,10);addAudit('Marked report submitted: '+r.project+' '+r.period,'update');persistDonorReports();}this.renderPage();},
   saveReportTitle(id,val){
     const r=DB.donorReports.find(x=>x.id===id);
     if(!r) return;
     const nextTitle = String(val || '').trim() || getDonorReportTitle(r);
     r.title = nextTitle;
     r.lastEdited = new Date().toISOString().slice(0,10);
+    persistDonorReports();
+    setDonorReportResumeId(id);
   },
-  saveReportSection(id,section,val){const r=DB.donorReports.find(x=>x.id===id);if(r&&r.content){r.content[section]=val;r.lastEdited=new Date().toISOString().slice(0,10);}},
+  saveReportSection(id,section,val){const r=DB.donorReports.find(x=>x.id===id);if(r&&r.content){r.content[section]=val;r.lastEdited=new Date().toISOString().slice(0,10);persistDonorReports();setDonorReportResumeId(id);}},
   formatReportEditorText(editorId, mode){
     const textarea = $(editorId);
     if(!textarea) return;
@@ -3420,7 +3479,7 @@ window.App = {
       }
     }
 
-    textarea.dispatchEvent(new Event('change', { bubbles: true }));
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
   },
   autoDraftReport(id){
     const report = DB.donorReports.find(x=>x.id===id);
@@ -3435,6 +3494,8 @@ window.App = {
         || `Draft (${tone} tone): Update this section with project-specific details and verified evidence.`;
     });
     report.lastEdited = new Date().toISOString().slice(0,10);
+    persistDonorReports();
+    setDonorReportResumeId(id);
     addAudit(`Auto-drafted donor report sections (${tone}): ${report.project} ${report.period}`,'update');
     this.renderPage();
     alert(`Draft narrative generated using ${tone} tone. You can refine each section before export.`);
@@ -3520,7 +3581,7 @@ window.App = {
     doc.save(filename);
     addAudit('Exported donor report as PDF: '+filename,'update');
   },
-  deleteDonor(id){Modal.confirm('Delete this report?',()=>{DB.donorReports=DB.donorReports.filter(x=>x.id!==id);App.renderPage();});},
+  deleteDonor(id){Modal.confirm('Delete this report?',()=>{DB.donorReports=DB.donorReports.filter(x=>x.id!==id);persistDonorReports();App.renderPage();});},
 
   // â”€â”€ USER ACTIONS â”€â”€
   openUserForm(id){

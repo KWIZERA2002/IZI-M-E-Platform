@@ -7,6 +7,7 @@ const xlsx = require('xlsx');
 const pool = require('../config/database');
 const auth = require('../MIDDLEWARE/Auth');
 const { sendInviteEmail } = require('../Services/EmailService');
+const { requirePermission } = require('../utils/rbac');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -478,7 +479,7 @@ function normalizeAutomationRuleRow(row) {
 }
 
 // Get all admin data
-router.get('/data', auth, async (req, res) => {
+router.get('/data', auth, requirePermission('admin:export'), async (req, res) => {
   try {
     const [farmers, indicators, activities, projects] = await Promise.all([
       pool.query('SELECT * FROM farmers'),
@@ -498,7 +499,7 @@ router.get('/data', auth, async (req, res) => {
   }
 });
 
-router.get('/automation-rules', auth, async (req, res) => {
+router.get('/automation-rules', auth, requirePermission('admin:settings'), async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM automation_rules ORDER BY id ASC');
     res.json(result.rows.map(normalizeAutomationRuleRow));
@@ -507,7 +508,7 @@ router.get('/automation-rules', auth, async (req, res) => {
   }
 });
 
-router.post('/automation-rules', auth, async (req, res) => {
+router.post('/automation-rules', auth, requirePermission('admin:settings'), async (req, res) => {
   const {
     name,
     enabled = true,
@@ -553,7 +554,7 @@ router.post('/automation-rules', auth, async (req, res) => {
   }
 });
 
-router.put('/automation-rules/:id', auth, async (req, res) => {
+router.put('/automation-rules/:id', auth, requirePermission('admin:settings'), async (req, res) => {
   const id = req.params.id;
   const {
     name,
@@ -603,7 +604,7 @@ router.put('/automation-rules/:id', auth, async (req, res) => {
   }
 });
 
-router.delete('/automation-rules/:id', auth, async (req, res) => {
+router.delete('/automation-rules/:id', auth, requirePermission('admin:settings'), async (req, res) => {
   const id = req.params.id;
   try {
     await pool.query('DELETE FROM automation_rules WHERE id = $1', [id]);
@@ -631,7 +632,7 @@ const adminAuth = (req, res, next) => {
   next();
 };
 
-router.get('/users', adminAuth, async (req, res) => {
+router.get('/users', auth, requirePermission('users:read'), async (req, res) => {
   try {
     const result = await pool.query('SELECT id, username AS name, email, role, status, email_verified, verification_token, verification_expires, invite_generated_at, created_at FROM users');
     res.json(result.rows.map(row => ({
@@ -644,7 +645,7 @@ router.get('/users', adminAuth, async (req, res) => {
   }
 });
 
-router.post('/users', adminAuth, async (req, res) => {
+router.post('/users', auth, requirePermission('users:create'), async (req, res) => {
   const { name, role = 'viewer', status = 'active' } = req.body || {};
   const email = normalizeEmail(req.body?.email);
   if (!email) {
@@ -677,7 +678,7 @@ router.post('/users', adminAuth, async (req, res) => {
     if (existingUser) {
       const normalizedName = await generateUniqueUsername(derivedName, existingUser.id);
       const updated = await pool.query(
-        'UPDATE users SET username = $1, role = $2, status = $3, password_hash = $4, verification_token = $5, verification_expires = $6, invite_generated_at = $7, email_verified = 0 WHERE id = $8 RETURNING id, username AS name, email, role, status, verification_expires, invite_generated_at, created_at',
+        'UPDATE users SET username = $1, role = $2, status = $3, password_hash = $4, verification_token = $5, verification_expires = $6, invite_generated_at = $7, email_verified = FALSE WHERE id = $8 RETURNING id, username AS name, email, role, status, verification_expires, invite_generated_at, created_at',
         [normalizedName, role, status, password_hash, verificationToken, verificationExpires, inviteGeneratedAt, existingUser.id]
       );
       userRow = updated.rows[0];
@@ -701,7 +702,7 @@ router.post('/users', adminAuth, async (req, res) => {
 
     const normalizedName = await generateUniqueUsername(derivedName);
     const result = await pool.query(
-      'INSERT INTO users (username, email, role, status, password_hash, email_verified, verification_token, verification_expires, invite_generated_at) VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8) RETURNING id, username AS name, email, role, status, verification_expires, invite_generated_at, created_at',
+      'INSERT INTO users (username, email, role, status, password_hash, email_verified, verification_token, verification_expires, invite_generated_at) VALUES ($1, $2, $3, $4, $5, FALSE, $6, $7, $8) RETURNING id, username AS name, email, role, status, verification_expires, invite_generated_at, created_at',
       [normalizedName, email, role, status, password_hash, verificationToken, verificationExpires, inviteGeneratedAt]
     );
     userRow = result.rows[0];
@@ -728,7 +729,7 @@ router.post('/users', adminAuth, async (req, res) => {
   }
 });
 
-router.post('/users/:id/resend-invite', adminAuth, async (req, res) => {
+router.post('/users/:id/resend-invite', auth, requirePermission('users:invite'), async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) {
     return res.status(400).json({ error: 'Invalid user id' });
@@ -752,7 +753,7 @@ router.post('/users/:id/resend-invite', adminAuth, async (req, res) => {
     const fallbackInviteUrl = `${req.protocol}://${req.get('host')}${invitePath}`;
 
     await pool.query(
-      'UPDATE users SET verification_token = $1, verification_expires = $2, invite_generated_at = $3, email_verified = 0 WHERE id = $4',
+      'UPDATE users SET verification_token = $1, verification_expires = $2, invite_generated_at = $3, email_verified = FALSE WHERE id = $4',
       [verificationToken, verificationExpires, inviteGeneratedAt, id]
     );
 
@@ -782,7 +783,7 @@ router.post('/users/:id/resend-invite', adminAuth, async (req, res) => {
   }
 });
 
-router.put('/users/:id', adminAuth, async (req, res) => {
+router.put('/users/:id', auth, requirePermission('users:update'), async (req, res) => {
   const id = req.params.id;
   const { name, email, role, status, password } = req.body || {};
   const updates = [];
@@ -837,7 +838,7 @@ router.put('/users/:id', adminAuth, async (req, res) => {
   }
 });
 
-router.delete('/users/:id', adminAuth, async (req, res) => {
+router.delete('/users/:id', auth, requirePermission('users:delete'), async (req, res) => {
   const id = req.params.id;
   if (parseInt(id, 10) === 1) {
     return res.status(400).json({ error: 'Cannot delete the primary admin user' });
@@ -851,7 +852,23 @@ router.delete('/users/:id', adminAuth, async (req, res) => {
 });
 
 // Create record
-router.post('/entity/:type', auth, async (req, res) => {
+router.post('/entity/:type', auth, (req, res, next) => {
+  const type = req.params.type;
+  const entityType = entityAliases[type] || type;
+  // Check permissions based on entity type
+  const permissionMap = {
+    'beneficiaries': 'beneficiaries:create',
+    'farmers': 'beneficiaries:create',
+    'projects': 'projects:create',
+    'indicators': 'indicators:create',
+    'field_activities': 'tasks:create'
+  };
+  const requiredPerm = permissionMap[entityType] || 'admin:import';
+  if (!req.hasPermission(requiredPerm)) {
+    return res.status(403).json({ error: 'Forbidden: Insufficient permissions' });
+  }
+  next();
+}, async (req, res) => {
   const type = req.params.type;
   const config = resolveEntity(type);
   if (!config) return res.status(400).json({ error: 'Invalid entity type' });
@@ -876,7 +893,22 @@ router.post('/entity/:type', auth, async (req, res) => {
 });
 
 // Update record
-router.put('/entity/:type/:id', auth, async (req, res) => {
+router.put('/entity/:type/:id', auth, (req, res, next) => {
+  const type = req.params.type;
+  const entityType = entityAliases[type] || type;
+  const permissionMap = {
+    'beneficiaries': 'beneficiaries:update',
+    'farmers': 'beneficiaries:update',
+    'projects': 'projects:update',
+    'indicators': 'indicators:update',
+    'field_activities': 'tasks:update'
+  };
+  const requiredPerm = permissionMap[entityType] || 'admin:import';
+  if (!req.hasPermission(requiredPerm)) {
+    return res.status(403).json({ error: 'Forbidden: Insufficient permissions' });
+  }
+  next();
+}, async (req, res) => {
   const type = req.params.type;
   const config = resolveEntity(type);
   if (!config) return res.status(400).json({ error: 'Invalid entity type' });
@@ -901,7 +933,22 @@ router.put('/entity/:type/:id', auth, async (req, res) => {
 });
 
 // Delete record
-router.delete('/entity/:type/:id', auth, async (req, res) => {
+router.delete('/entity/:type/:id', auth, (req, res, next) => {
+  const type = req.params.type;
+  const entityType = entityAliases[type] || type;
+  const permissionMap = {
+    'beneficiaries': 'beneficiaries:delete',
+    'farmers': 'beneficiaries:delete',
+    'projects': 'projects:delete',
+    'indicators': 'indicators:delete',
+    'field_activities': 'tasks:delete'
+  };
+  const requiredPerm = permissionMap[entityType] || 'admin:import';
+  if (!req.hasPermission(requiredPerm)) {
+    return res.status(403).json({ error: 'Forbidden: Insufficient permissions' });
+  }
+  next();
+}, async (req, res) => {
   const type = req.params.type;
   const config = resolveEntity(type);
   if (!config) return res.status(400).json({ error: 'Invalid entity type' });
@@ -916,7 +963,7 @@ router.delete('/entity/:type/:id', auth, async (req, res) => {
 });
 
 // Parse uploaded CSV/XLSX in backend and return normalized preview payload
-router.post('/import/preview', auth, upload.single('file'), async (req, res) => {
+router.post('/import/preview', auth, requirePermission('admin:import'), upload.single('file'), async (req, res) => {
   const type = normalizeImportType(req.body?.type);
   const defaultProject = String(req.body?.projectContext || '').trim();
   const defaultInterventionType = String(req.body?.interventionType || '').trim();
@@ -958,7 +1005,7 @@ router.post('/import/preview', auth, upload.single('file'), async (req, res) => 
 });
 
 // Bulk import records
-router.post('/import', auth, upload.single('file'), async (req, res) => {
+router.post('/import', auth, requirePermission('admin:import'), upload.single('file'), async (req, res) => {
   let type = normalizeImportType(req.body?.type);
   const defaultProject = String(req.body?.projectContext || '').trim();
   const defaultInterventionType = String(req.body?.interventionType || '').trim();

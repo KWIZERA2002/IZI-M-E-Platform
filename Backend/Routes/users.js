@@ -96,12 +96,12 @@ router.post('/register', async (req, res) => {
     } catch (emailErr) {
       console.error('Verification email failed:', emailErr.message);
       if (!emailDisabled) {
-        await pool.query('UPDATE users SET email_verified = 1 WHERE id = $1', [user.id]);
+        await pool.query('UPDATE users SET email_verified = TRUE WHERE id = $1', [user.id]);
       }
     }
 
     if (emailDisabled || !emailSent) {
-      await pool.query('UPDATE users SET email_verified = 1 WHERE id = $1', [user.id]);
+      await pool.query('UPDATE users SET email_verified = TRUE WHERE id = $1', [user.id]);
       return res.json({
         message: 'Registration successful! Your account is active because email verification is disabled or unavailable.',
         user: { id: user.id, username: user.username, email: user.email },
@@ -176,12 +176,12 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    const token = jwt.sign({ id: user.id, username: user.username }, process.env.JWT_SECRET, {
+    const token = jwt.sign({ id: user.id, username: user.username, role: user.role || 'viewer' }, process.env.JWT_SECRET, {
       expiresIn: '8h',
     });
 
     res.json({
-      user: { id: user.id, username: user.username, email: user.email },
+      user: { id: user.id, username: user.username, email: user.email, role: user.role || 'viewer' },
       token
     });
   } catch (err) {
@@ -209,17 +209,17 @@ router.post('/verify-email', async (req, res) => {
     const user = result.rows[0];
 
     await pool.query(
-      'UPDATE users SET email_verified = 1, verification_token = NULL, verification_expires = NULL WHERE id = $1',
+      'UPDATE users SET email_verified = TRUE, verification_token = NULL, verification_expires = NULL WHERE id = $1',
       [user.id]
     );
 
-    const jwtToken = jwt.sign({ id: user.id, username: user.username }, process.env.JWT_SECRET, {
+    const jwtToken = jwt.sign({ id: user.id, username: user.username, role: user.role || 'viewer' }, process.env.JWT_SECRET, {
       expiresIn: '8h',
     });
 
     res.json({
       message: 'Email verified successfully!',
-      user: { id: user.id, username: user.username, email: user.email },
+      user: { id: user.id, username: user.username, email: user.email, role: user.role || 'viewer' },
       token: jwtToken
     });
   } catch (err) {
@@ -273,7 +273,7 @@ router.get('/invite-info', async (req, res) => {
   if (!token) return res.status(400).json({ error: 'Token is required' });
   try {
     const result = await pool.query(
-      'SELECT id, username, email, role FROM users WHERE verification_token = $1 AND verification_expires > $2 AND email_verified = 0',
+      'SELECT id, username, email, role FROM users WHERE verification_token = $1 AND verification_expires > $2 AND email_verified = FALSE',
       [token, new Date().toISOString()]
     );
     if (result.rows.length === 0) {
@@ -302,7 +302,7 @@ router.post('/accept-invite', async (req, res) => {
   }
   try {
     const result = await pool.query(
-      'SELECT * FROM users WHERE verification_token = $1 AND verification_expires > $2 AND email_verified = 0',
+      'SELECT * FROM users WHERE verification_token = $1 AND verification_expires > $2 AND email_verified = FALSE',
       [token, new Date().toISOString()]
     );
     if (result.rows.length === 0) {
@@ -319,14 +319,14 @@ router.post('/accept-invite', async (req, res) => {
     const password_hash = await bcrypt.hash(password, salt);
 
     await pool.query(
-      'UPDATE users SET username = $1, password_hash = $2, email_verified = 1, verification_token = NULL, verification_expires = NULL WHERE id = $3',
+      'UPDATE users SET username = $1, password_hash = $2, email_verified = TRUE, verification_token = NULL, verification_expires = NULL WHERE id = $3',
       [username, password_hash, user.id]
     );
 
-    const jwtToken = jwt.sign({ id: user.id, username }, process.env.JWT_SECRET, { expiresIn: '8h' });
+    const jwtToken = jwt.sign({ id: user.id, username, role: user.role || 'viewer' }, process.env.JWT_SECRET, { expiresIn: '8h' });
     res.json({
       message: 'Invitation accepted! Welcome to IZI M&E Platform.',
-      user: { id: user.id, username, email: user.email },
+      user: { id: user.id, username, email: user.email, role: user.role || 'viewer' },
       token: jwtToken
     });
   } catch (err) {

@@ -12,31 +12,16 @@ const smtpPass = isGmailHost ? rawSmtpPass.replace(/\s+/g, '') : rawSmtpPass;
 const emailFrom = String(process.env.EMAIL_FROM || process.env.SMTP_FROM || process.env.MAIL_FROM || smtpUser || '').trim();
 const appUrl = (process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || process.env.FRONTEND_URL || 'http://localhost:5000').replace(/\/$/, '');
 const manualDisable = String(process.env.DISABLE_EMAIL || '').toLowerCase() === 'true';
+const smtpConnectionTimeout = Number(process.env.SMTP_CONNECTION_TIMEOUT_MS || 12000);
+const smtpGreetingTimeout = Number(process.env.SMTP_GREETING_TIMEOUT_MS || 12000);
+const smtpSocketTimeout = Number(process.env.SMTP_SOCKET_TIMEOUT_MS || 20000);
+const smtpDnsTimeout = Number(process.env.SMTP_DNS_TIMEOUT_MS || 10000);
 
 const hasAuth = !!(smtpUser && smtpPass);
 const emailDisabled = manualDisable || (!smtpUrl && !smtpHost) || !emailFrom;
 
-const transporter = emailDisabled
-  ? null
-  : (smtpUrl
-      ? nodemailer.createTransport(smtpUrl)
-      : nodemailer.createTransport({
-          host: smtpHost,
-          port: smtpPort,
-          secure: smtpPort === 465,
-          auth: hasAuth ? {
-            user: smtpUser,
-            pass: smtpPass
-          } : undefined,
-          tls: {
-            rejectUnauthorized: String(process.env.SMTP_TLS_REJECT_UNAUTHORIZED || '').toLowerCase() !== 'false'
-          }
-        }));
-
-function buildTransportWithoutCustomFromAuth() {
-  if (emailDisabled) return null;
-  if (smtpUrl) return nodemailer.createTransport(smtpUrl);
-  return nodemailer.createTransport({
+function getBaseTransportOptions(overrides = {}) {
+  return {
     host: smtpHost,
     port: smtpPort,
     secure: smtpPort === 465,
@@ -46,8 +31,102 @@ function buildTransportWithoutCustomFromAuth() {
     } : undefined,
     tls: {
       rejectUnauthorized: String(process.env.SMTP_TLS_REJECT_UNAUTHORIZED || '').toLowerCase() !== 'false'
+    },
+    connectionTimeout: smtpConnectionTimeout,
+    greetingTimeout: smtpGreetingTimeout,
+    socketTimeout: smtpSocketTimeout,
+    dnsTimeout: smtpDnsTimeout,
+    ...overrides
+  };
+}
+
+function createTransport(overrides = {}) {
+  if (emailDisabled) return null;
+  if (smtpUrl) {
+    return nodemailer.createTransport(smtpUrl, {
+      connectionTimeout: smtpConnectionTimeout,
+      greetingTimeout: smtpGreetingTimeout,
+      socketTimeout: smtpSocketTimeout,
+      dnsTimeout: smtpDnsTimeout,
+      ...overrides
+    });
+  }
+  return nodemailer.createTransport(getBaseTransportOptions(overrides));
+}
+
+function createGmailAlternatePortTransport() {
+  if (emailDisabled || smtpUrl || !isGmailHost) return null;
+  const altPort = smtpPort === 465 ? 587 : 465;
+  return nodemailer.createTransport(getBaseTransportOptions({
+    port: altPort,
+    secure: altPort === 465
+  }));
+}
+
+function formatSmtpError(prefix, error) {
+  const message = error && error.message ? String(error.message) : 'Unknown SMTP error';
+  const code = error && error.code ? String(error.code) : '';
+  const responseCode = error && error.responseCode ? String(error.responseCode) : '';
+  const response = error && error.response ? String(error.response) : '';
+  return `${prefix}: ${message}${code ? ` [${code}]` : ''}${responseCode ? ` [${responseCode}]` : ''}${response ? ` | ${response}` : ''}`;
+}
+
+function isTimeoutError(error) {
+  const code = String(error && error.code ? error.code : '').toUpperCase();
+  const text = `${error && error.message ? error.message : ''} ${error && error.response ? error.response : ''}`;
+  return code === 'ETIMEDOUT' || /timeout|timed out|connection timeout|greeting never received/i.test(text);
+}
+
+const transporter = createTransport();
+
+function buildTransportWithoutCustomFromAuth() {
+  return createTransport();
+}
+
+async function sendMailWithResilience(mailOptions, options = {}) {
+  const { errorPrefix = 'Failed to send email', allowFromFallback = false } = options;
+
+  try {
+    await transporter.sendMail(mailOptions);
+    return { success: true };
+  } catch (error) {
+    const primaryMessage = error && error.message ? error.message : 'Unknown SMTP error';
+    const response = error && error.response ? String(error.response) : '';
+
+    const shouldRetryWithSimpleFrom = Boolean(
+      allowFromFallback
+      && smtpUser
+      && emailFrom
+      && emailFrom !== smtpUser
+      && /from|sender|mailbox|envelope|550|553|5\.7\./i.test(`${primaryMessage} ${response}`)
+    );
+
+    if (shouldRetryWithSimpleFrom) {
+      try {
+        const retryTransporter = buildTransportWithoutCustomFromAuth();
+        await retryTransporter.sendMail({ ...mailOptions, from: smtpUser });
+        console.warn('[Mail] Email sent after fallback to SMTP_USER as from address');
+        return { success: true, usedFromFallback: true };
+      } catch (retryError) {
+        throw new Error(formatSmtpError(errorPrefix, retryError));
+      }
     }
-  });
+
+    if (isTimeoutError(error)) {
+      const altTransporter = createGmailAlternatePortTransport();
+      if (altTransporter) {
+        try {
+          await altTransporter.sendMail(mailOptions);
+          console.warn('[Mail] Email sent after timeout fallback on Gmail alternate port');
+          return { success: true, usedPortFallback: true };
+        } catch (altError) {
+          throw new Error(formatSmtpError(errorPrefix, altError));
+        }
+      }
+    }
+
+    throw new Error(formatSmtpError(errorPrefix, error));
+  }
 }
 
 if (!emailDisabled) {
@@ -97,11 +176,11 @@ const sendVerificationEmail = async (email, username, token) => {
   };
 
   try {
-    await transporter.sendMail(mailOptions);
+    await sendMailWithResilience(mailOptions, { errorPrefix: 'Failed to send verification email' });
     return { success: true };
   } catch (error) {
     console.error('Email send failed:', error);
-    throw new Error('Failed to send verification email: ' + error.message);
+    throw error;
   }
 };
 
@@ -137,11 +216,11 @@ const sendPasswordResetEmail = async (email, username, resetToken) => {
   };
 
   try {
-    await transporter.sendMail(mailOptions);
+    await sendMailWithResilience(mailOptions, { errorPrefix: 'Failed to send reset email' });
     return { success: true };
   } catch (error) {
     console.error('Email send failed:', error);
-    throw new Error('Failed to send reset email: ' + error.message);
+    throw error;
   }
 };
 
@@ -180,38 +259,14 @@ const sendInviteEmail = async (email, name, inviteUrl) => {
   };
 
   try {
-    await transporter.sendMail(mailOptions);
+    await sendMailWithResilience(mailOptions, {
+      errorPrefix: 'Failed to send invitation email',
+      allowFromFallback: true
+    });
     return { success: true, inviteUrl };
   } catch (error) {
-    const primaryMessage = error && error.message ? error.message : 'Unknown SMTP error';
-    const code = error && error.code ? String(error.code) : '';
-    const response = error && error.response ? String(error.response) : '';
-    const responseCode = error && error.responseCode ? String(error.responseCode) : '';
-
-    // Retry once with a simple sender mailbox if provider rejects display-name "from" value.
-    const shouldRetryWithSimpleFrom = Boolean(
-      smtpUser
-      && emailFrom
-      && emailFrom !== smtpUser
-      && /from|sender|mailbox|envelope|550|553|5\.7\./i.test(`${primaryMessage} ${response}`)
-    );
-
-    if (shouldRetryWithSimpleFrom) {
-      try {
-        const retryTransporter = buildTransportWithoutCustomFromAuth();
-        await retryTransporter.sendMail({ ...mailOptions, from: smtpUser });
-        console.warn('[Mail] Invite email sent after fallback to SMTP_USER as from address');
-        return { success: true, inviteUrl };
-      } catch (retryError) {
-        const retryMessage = retryError && retryError.message ? retryError.message : 'Unknown retry SMTP error';
-        const retryResponse = retryError && retryError.response ? String(retryError.response) : '';
-        console.error('Email send failed (primary + retry):', primaryMessage, retryMessage);
-        throw new Error(`Failed to send invitation email: ${retryMessage}${retryResponse ? ` | ${retryResponse}` : ''}`);
-      }
-    }
-
     console.error('Email send failed:', error);
-    throw new Error(`Failed to send invitation email: ${primaryMessage}${code ? ` [${code}]` : ''}${responseCode ? ` [${responseCode}]` : ''}${response ? ` | ${response}` : ''}`);
+    throw error;
   }
 };
 
@@ -242,6 +297,30 @@ const testSmtpConnection = async () => {
       }
     };
   } catch (err) {
+    if (isTimeoutError(err)) {
+      const altTransporter = createGmailAlternatePortTransport();
+      if (altTransporter) {
+        try {
+          await altTransporter.verify();
+          return {
+            enabled: true,
+            connected: true,
+            warning: 'Primary SMTP port timed out; alternate Gmail port verified successfully',
+            config: {
+              transport: 'host/port (fallback)',
+              host: smtpHost,
+              port: smtpPort === 465 ? 587 : 465,
+              secure: smtpPort !== 465,
+              user: smtpUser || '(none)',
+              from: emailFrom
+            }
+          };
+        } catch (_) {
+          // Keep original error below for clearer diagnosis.
+        }
+      }
+    }
+
     return {
       enabled: true,
       connected: false,

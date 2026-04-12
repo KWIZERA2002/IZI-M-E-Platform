@@ -2573,6 +2573,7 @@ ${data.length > 3 ? `<div class="db-more">... and ${data.length - 3} more record
 window.App = {
   currentPage:'dashboard',
   _fieldState:{},
+  _savingUser:false,
 
   async init(){
     buildNav();
@@ -3597,9 +3598,18 @@ window.App = {
       `<button class="btn btn-ghost" onclick="Modal.close()">Cancel</button><button class="btn btn-primary" onclick="App.saveUser(${id||'null'})">Save User</button>`);
   },
   async saveUser(id){
+    if (this._savingUser) return;
     const rec={name:$('uf-name').value.trim(),email:$('uf-email').value.trim(),role:$('uf-role').value,projects:$('uf-proj').value.trim(),status:$('uf-status').value};
     if(!rec.name||!rec.email)return alert('Name and email required');
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rec.email)) return alert('Please provide a valid email address');
+
+    const saveBtn = document.querySelector('#modal-root .btn-primary');
+    const originalLabel = saveBtn ? saveBtn.innerHTML : '';
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.textContent = id ? 'Updating user...' : 'Inviting user...';
+    }
+    this._savingUser = true;
 
     try {
       let user;
@@ -3645,6 +3655,12 @@ window.App = {
       }
     } catch (err) {
       alert('Save user failed: ' + err.message);
+    } finally {
+      this._savingUser = false;
+      if (saveBtn && saveBtn.isConnected) {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = originalLabel;
+      }
     }
   },
   showInviteResult(user){

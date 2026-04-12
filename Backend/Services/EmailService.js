@@ -59,15 +59,9 @@ function getBaseTransportOptions(overrides = {}) {
 
 function createTransport(overrides = {}) {
   if (emailDisabled) return null;
-  if (smtpUrl) {
-    return nodemailer.createTransport(smtpUrl, {
-      connectionTimeout: smtpConnectionTimeout,
-      greetingTimeout: smtpGreetingTimeout,
-      socketTimeout: smtpSocketTimeout,
-      dnsTimeout: smtpDnsTimeout,
-      ...overrides
-    });
-  }
+  // Important: nodemailer.createTransport(url, defaults) treats the second argument as
+  // message defaults, not transport options. Build the transport from normalized options
+  // so timeout/family/TLS settings are actually applied.
   return nodemailer.createTransport(getBaseTransportOptions(overrides));
 }
 
@@ -169,7 +163,7 @@ async function sendMailWithResilience(mailOptions, options = {}) {
 }
 
 if (!emailDisabled) {
-  console.log(`[Mail] SMTP configured and ready (${smtpUrl ? 'url transport' : `${smtpHost}:${smtpPort}`})${hasAuth ? ' with auth' : ' without auth'}`);
+  console.log(`[Mail] SMTP configured and ready (${derivedSmtpHost || 'unresolved-host'}:${smtpPort}${smtpUrl ? ', derived from SMTP_URL' : ''})${hasAuth ? ' with auth' : ' without auth'}`);
   transporter.verify().then(() => {
     console.log('[Mail] SMTP connection verified successfully');
   }).catch((err) => {
@@ -327,10 +321,10 @@ const testSmtpConnection = async () => {
       enabled: true,
       connected: true,
       config: {
-        transport: smtpUrl ? 'url' : 'host/port',
-        host: smtpUrl ? '(SMTP_URL)' : smtpHost,
-        port: smtpUrl ? null : smtpPort,
-        secure: smtpPort === 465,
+        transport: smtpUrl ? 'derived host/port from SMTP_URL' : 'host/port',
+        host: derivedSmtpHost || '(not set)',
+        port: smtpPort,
+        secure: derivedSmtpSecure,
         user: smtpUser || '(none)',
         from: emailFrom
       }
@@ -390,9 +384,9 @@ const testSmtpConnection = async () => {
       connected: false,
       error: err.message,
       config: {
-        transport: smtpUrl ? 'url' : 'host/port',
-        host: smtpUrl ? '(SMTP_URL)' : smtpHost,
-        port: smtpUrl ? null : smtpPort,
+        transport: smtpUrl ? 'derived host/port from SMTP_URL' : 'host/port',
+        host: derivedSmtpHost || '(not set)',
+        port: smtpPort,
         user: smtpUser || '(none)',
         from: emailFrom
       }

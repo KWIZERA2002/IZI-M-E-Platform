@@ -2,10 +2,24 @@ const nodemailer = require('nodemailer');
 
 const smtpUrl = String(process.env.SMTP_URL || process.env.MAIL_URL || '').trim();
 const smtpHost = String(process.env.SMTP_HOST || process.env.SMTP_SERVER || process.env.MAIL_HOST || '').trim();
-const smtpPort = Number(process.env.SMTP_PORT || process.env.MAIL_PORT || 587);
-const rawSmtpUser = String(process.env.SMTP_USER || process.env.SMTP_USERNAME || process.env.MAIL_USER || process.env.EMAIL_USER || '').trim();
-const rawSmtpPass = String(process.env.SMTP_PASS || process.env.SMTP_PASSWORD || process.env.MAIL_PASS || process.env.EMAIL_PASSWORD || '').trim();
-const isGmailHost = /(^|\.)gmail\.com$/i.test(smtpHost) || /smtp\.gmail\.com/i.test(smtpUrl);
+const parsedSmtpUrl = (() => {
+  if (!smtpUrl) return null;
+  try {
+    return new URL(smtpUrl);
+  } catch {
+    return null;
+  }
+})();
+const rawSmtpPort = String(process.env.SMTP_PORT || process.env.MAIL_PORT || '').trim();
+const parsedSmtpUser = parsedSmtpUrl?.username ? decodeURIComponent(parsedSmtpUrl.username) : '';
+const parsedSmtpPass = parsedSmtpUrl?.password ? decodeURIComponent(parsedSmtpUrl.password) : '';
+const rawSmtpUser = String(process.env.SMTP_USER || process.env.SMTP_USERNAME || process.env.MAIL_USER || process.env.EMAIL_USER || parsedSmtpUser || '').trim();
+const rawSmtpPass = String(process.env.SMTP_PASS || process.env.SMTP_PASSWORD || process.env.MAIL_PASS || process.env.EMAIL_PASSWORD || parsedSmtpPass || '').trim();
+const derivedSmtpHost = smtpHost || String(parsedSmtpUrl?.hostname || '').trim();
+const derivedSmtpPort = Number(rawSmtpPort || parsedSmtpUrl?.port || (parsedSmtpUrl?.protocol === 'smtps:' ? 465 : 587) || 587);
+const derivedSmtpSecure = parsedSmtpUrl?.protocol === 'smtps:' || derivedSmtpPort === 465;
+const smtpPort = derivedSmtpPort;
+const isGmailHost = /(^|\.)gmail\.com$/i.test(derivedSmtpHost) || /smtp\.gmail\.com/i.test(smtpUrl);
 const smtpUser = rawSmtpUser;
 // Gmail App Passwords are often copied with spaces; normalize them automatically.
 const smtpPass = isGmailHost ? rawSmtpPass.replace(/\s+/g, '') : rawSmtpPass;
@@ -16,26 +30,29 @@ const smtpConnectionTimeout = Number(process.env.SMTP_CONNECTION_TIMEOUT_MS || 1
 const smtpGreetingTimeout = Number(process.env.SMTP_GREETING_TIMEOUT_MS || 12000);
 const smtpSocketTimeout = Number(process.env.SMTP_SOCKET_TIMEOUT_MS || 20000);
 const smtpDnsTimeout = Number(process.env.SMTP_DNS_TIMEOUT_MS || 10000);
+const smtpIpFamily = Number(process.env.SMTP_IP_FAMILY || 4);
 
 const hasAuth = !!(smtpUser && smtpPass);
 const emailDisabled = manualDisable || (!smtpUrl && !smtpHost) || !emailFrom;
 
 function getBaseTransportOptions(overrides = {}) {
   return {
-    host: smtpHost,
+    host: derivedSmtpHost,
     port: smtpPort,
-    secure: smtpPort === 465,
+    secure: derivedSmtpSecure,
     auth: hasAuth ? {
       user: smtpUser,
       pass: smtpPass
     } : undefined,
     tls: {
+      servername: derivedSmtpHost,
       rejectUnauthorized: String(process.env.SMTP_TLS_REJECT_UNAUTHORIZED || '').toLowerCase() !== 'false'
     },
     connectionTimeout: smtpConnectionTimeout,
     greetingTimeout: smtpGreetingTimeout,
     socketTimeout: smtpSocketTimeout,
     dnsTimeout: smtpDnsTimeout,
+    family: smtpIpFamily,
     ...overrides
   };
 }
@@ -55,12 +72,12 @@ function createTransport(overrides = {}) {
 }
 
 function createDirectHostTransport(overrides = {}) {
-  if (emailDisabled || !smtpHost) return null;
+  if (emailDisabled || !derivedSmtpHost) return null;
   return nodemailer.createTransport(getBaseTransportOptions(overrides));
 }
 
 function createGmailAlternatePortTransport() {
-  if (emailDisabled || !isGmailHost || !smtpHost) return null;
+  if (emailDisabled || !isGmailHost || !derivedSmtpHost) return null;
   const altPort = smtpPort === 465 ? 587 : 465;
   return nodemailer.createTransport(getBaseTransportOptions({
     port: altPort,
@@ -85,7 +102,7 @@ function isTimeoutError(error) {
 const transporter = createTransport();
 
 function buildTransportWithoutCustomFromAuth() {
-  return createTransport();
+  return createDirectHostTransport() || createTransport();
 }
 
 async function sendMailWithResilience(mailOptions, options = {}) {
@@ -120,7 +137,7 @@ async function sendMailWithResilience(mailOptions, options = {}) {
     if (isTimeoutError(error)) {
       const timeoutFallbackTransports = [];
 
-      if (smtpUrl && smtpHost) {
+      if (derivedSmtpHost) {
         timeoutFallbackTransports.push({
           name: 'direct host/port transport',
           transporter: createDirectHostTransport()
@@ -328,9 +345,9 @@ const testSmtpConnection = async () => {
           transporter: createDirectHostTransport(),
           config: {
             transport: 'host/port (fallback)',
-            host: smtpHost,
+              host: derivedSmtpHost,
             port: smtpPort,
-            secure: smtpPort === 465,
+              secure: derivedSmtpSecure,
             user: smtpUser || '(none)',
             from: emailFrom
           }
@@ -343,7 +360,7 @@ const testSmtpConnection = async () => {
           transporter: createGmailAlternatePortTransport(),
           config: {
             transport: 'host/port (fallback)',
-            host: smtpHost,
+              host: derivedSmtpHost,
             port: smtpPort === 465 ? 587 : 465,
             secure: smtpPort !== 465,
             user: smtpUser || '(none)',

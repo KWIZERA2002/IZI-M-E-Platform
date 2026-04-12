@@ -247,6 +247,31 @@ app.get('/accept-invite', (req, res) => {
       </div>
       <script>
         let token = null;
+        let nextPath = '/IZI-ME-Platform.html';
+
+        function sanitizeNextPath(rawValue) {
+          const value = String(rawValue || '').trim();
+          if (!value) return '/IZI-ME-Platform.html';
+          // Prevent open redirects: only allow same-origin absolute paths.
+          if (!value.startsWith('/') || value.startsWith('//')) return '/IZI-ME-Platform.html';
+          return value;
+        }
+
+        function resolveNextPath() {
+          const search = new URLSearchParams(window.location.search);
+          const direct = search.get('next') || search.get('redirect') || '';
+          if (direct) return sanitizeNextPath(direct);
+
+          // Also support next path carried inside hash fragment.
+          if (window.location.hash) {
+            const hash = window.location.hash.replace(/^#/, '');
+            const hashParams = new URLSearchParams(hash);
+            const hashed = hashParams.get('next') || hashParams.get('redirect') || '';
+            if (hashed) return sanitizeNextPath(hashed);
+          }
+
+          return '/IZI-ME-Platform.html';
+        }
 
         function extractToken() {
           const search = new URLSearchParams(window.location.search);
@@ -311,6 +336,7 @@ app.get('/accept-invite', (req, res) => {
         });
 
         async function loadInvite() {
+          nextPath = resolveNextPath();
           extractToken();
           if (!token) {
             document.getElementById('subtitle').textContent = 'No invitation token found. Please use the link from your invitation email.';
@@ -357,7 +383,10 @@ app.get('/accept-invite', (req, res) => {
               localStorage.setItem('token', d.token);
               showMsg('Welcome, ' + (d.user.username || username) + '! Redirecting to the platform...', 'success');
               document.getElementById('form').style.display = 'none';
-              setTimeout(() => window.location.href = '/IZI-ME-Platform.html?token=' + encodeURIComponent(d.token) + '&source=invite', 1200);
+              setTimeout(() => {
+                const separator = nextPath.includes('?') ? '&' : '?';
+                window.location.href = nextPath + separator + 'token=' + encodeURIComponent(d.token) + '&source=invite';
+              }, 1200);
             } else {
               showMsg(d.error || 'Could not complete setup. Please try again.', 'error');
               btn.disabled = false;

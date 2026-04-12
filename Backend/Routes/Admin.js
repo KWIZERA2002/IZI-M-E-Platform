@@ -673,7 +673,7 @@ router.post('/users', auth, requirePermission('users:create'), async (req, res) 
     const verificationToken = crypto.randomBytes(32).toString('hex');
     const verificationExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     const inviteGeneratedAt = new Date().toISOString();
-    const invitePath = `/accept-invite?token=${verificationToken}`;
+    const invitePath = `/accept-invite?token=${verificationToken}&next=${encodeURIComponent('/IZI-ME-Platform.html')}`;
     const fallbackInviteUrl = `${getPublicBaseUrl(req)}${invitePath}`;
 
     if (existingUser && Number(existingUser.email_verified) === 1) {
@@ -767,7 +767,7 @@ router.post('/users/:id/resend-invite', auth, requirePermission('users:invite'),
     const verificationToken = crypto.randomBytes(32).toString('hex');
     const verificationExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     const inviteGeneratedAt = new Date().toISOString();
-    const invitePath = `/accept-invite?token=${verificationToken}`;
+    const invitePath = `/accept-invite?token=${verificationToken}&next=${encodeURIComponent('/IZI-ME-Platform.html')}`;
     const fallbackInviteUrl = `${getPublicBaseUrl(req)}${invitePath}`;
 
     await pool.query(

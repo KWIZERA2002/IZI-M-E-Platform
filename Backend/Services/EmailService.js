@@ -54,8 +54,13 @@ function createTransport(overrides = {}) {
   return nodemailer.createTransport(getBaseTransportOptions(overrides));
 }
 
+function createDirectHostTransport(overrides = {}) {
+  if (emailDisabled || !smtpHost) return null;
+  return nodemailer.createTransport(getBaseTransportOptions(overrides));
+}
+
 function createGmailAlternatePortTransport() {
-  if (emailDisabled || smtpUrl || !isGmailHost) return null;
+  if (emailDisabled || !isGmailHost || !smtpHost) return null;
   const altPort = smtpPort === 465 ? 587 : 465;
   return nodemailer.createTransport(getBaseTransportOptions({
     port: altPort,
@@ -113,14 +118,31 @@ async function sendMailWithResilience(mailOptions, options = {}) {
     }
 
     if (isTimeoutError(error)) {
+      const timeoutFallbackTransports = [];
+
+      if (smtpUrl && smtpHost) {
+        timeoutFallbackTransports.push({
+          name: 'direct host/port transport',
+          transporter: createDirectHostTransport()
+        });
+      }
+
       const altTransporter = createGmailAlternatePortTransport();
       if (altTransporter) {
+        timeoutFallbackTransports.push({
+          name: 'gmail alternate port transport',
+          transporter: altTransporter
+        });
+      }
+
+      for (const fallback of timeoutFallbackTransports) {
+        if (!fallback.transporter) continue;
         try {
-          await altTransporter.sendMail(mailOptions);
-          console.warn('[Mail] Email sent after timeout fallback on Gmail alternate port');
+          await fallback.transporter.sendMail(mailOptions);
+          console.warn(`[Mail] Email sent after timeout fallback on ${fallback.name}`);
           return { success: true, usedPortFallback: true };
         } catch (altError) {
-          throw new Error(formatSmtpError(errorPrefix, altError));
+          console.warn(`[Mail] Timeout fallback failed on ${fallback.name}:`, altError.message);
         }
       }
     }
@@ -298,25 +320,50 @@ const testSmtpConnection = async () => {
     };
   } catch (err) {
     if (isTimeoutError(err)) {
-      const altTransporter = createGmailAlternatePortTransport();
-      if (altTransporter) {
+      const timeoutFallbackVerifiers = [];
+
+      if (smtpUrl && smtpHost) {
+        timeoutFallbackVerifiers.push({
+          name: 'direct host/port transport',
+          transporter: createDirectHostTransport(),
+          config: {
+            transport: 'host/port (fallback)',
+            host: smtpHost,
+            port: smtpPort,
+            secure: smtpPort === 465,
+            user: smtpUser || '(none)',
+            from: emailFrom
+          }
+        });
+      }
+
+      if (isGmailHost) {
+        timeoutFallbackVerifiers.push({
+          name: 'gmail alternate port transport',
+          transporter: createGmailAlternatePortTransport(),
+          config: {
+            transport: 'host/port (fallback)',
+            host: smtpHost,
+            port: smtpPort === 465 ? 587 : 465,
+            secure: smtpPort !== 465,
+            user: smtpUser || '(none)',
+            from: emailFrom
+          }
+        });
+      }
+
+      for (const fallback of timeoutFallbackVerifiers) {
+        if (!fallback.transporter) continue;
         try {
-          await altTransporter.verify();
+          await fallback.transporter.verify();
           return {
             enabled: true,
             connected: true,
-            warning: 'Primary SMTP port timed out; alternate Gmail port verified successfully',
-            config: {
-              transport: 'host/port (fallback)',
-              host: smtpHost,
-              port: smtpPort === 465 ? 587 : 465,
-              secure: smtpPort !== 465,
-              user: smtpUser || '(none)',
-              from: emailFrom
-            }
+            warning: `Primary SMTP transport timed out; fallback ${fallback.name} verified successfully`,
+            config: fallback.config
           };
         } catch (_) {
-          // Keep original error below for clearer diagnosis.
+          // Keep trying the next fallback.
         }
       }
     }
